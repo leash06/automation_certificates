@@ -13,6 +13,9 @@ from dotenv import dotenv_values
 logger = logging.getLogger(__name__)
 
 ENV_FILE = Path(__file__).parent / ".env"
+# The placeholder values in .env.example, to warn if they were not replaced.
+EXAMPLE_ADDRESS = "your.address@gmail.com"
+EXAMPLE_PASSWORD = "abcdefghijklmnop"
 # Who already received which template, to warn before sending twice.
 # It lives in output/, which is never pushed to GitHub.
 HISTORY_FILE = Path(__file__).parent / "output" / "sent_history.csv"
@@ -44,6 +47,11 @@ def load_gmail_credentials(env_file=ENV_FILE):
             "The .env file was found, but GMAIL_ADDRESS or GMAIL_APP_PASSWORD is "
             "missing or empty. Write them exactly as in .env.example."
         )
+    if address == EXAMPLE_ADDRESS or password.replace(" ", "") == EXAMPLE_PASSWORD:
+        raise ValueError(
+            "The .env file still contains the example values from .env.example. "
+            "Replace them with your Gmail address and App Password, then save the file."
+        )
     # Google shows App Passwords as 4 groups of 4 letters; the spaces are not part of it.
     return address, password.replace(" ", "")
 
@@ -72,10 +80,23 @@ def check_gmail_login(sender, password):
     try:
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
             server.login(sender, password)
-    except smtplib.SMTPAuthenticationError:
-        raise ValueError("Gmail refused the login. Check GMAIL_ADDRESS and GMAIL_APP_PASSWORD in the .env file.")
-    except OSError:
-        raise ValueError("Could not reach Gmail. Check the internet connection and try again.")
+    except smtplib.SMTPAuthenticationError as error:
+        logger.error("Gmail refused the login: %s", error)
+        raise ValueError(
+            "Gmail refused the login. Check GMAIL_ADDRESS and GMAIL_APP_PASSWORD in the .env file. "
+            "The password must be an App Password, not your normal Gmail password."
+        )
+    # SMTPException is itself a kind of OSError in Python, so it must be
+    # caught first; otherwise every Gmail answer would look like a network problem.
+    except smtplib.SMTPException as error:
+        logger.error("Gmail answered with an error: %s", error)
+        raise ValueError(f"Gmail answered with an error: {error}")
+    except OSError as error:
+        logger.error("Could not connect to Gmail: %r", error)
+        raise ValueError(
+            "Could not reach Gmail. Check the internet connection, or whether an "
+            "antivirus or company network blocks sending email. Details are in certificates.log."
+        )
 
 
 def send_one_email(email, sender, password):

@@ -48,9 +48,11 @@ def fake_gmail(monkeypatch, tmp_path):
     monkeypatch.setattr(mailer.smtplib, "SMTP_SSL", FakeGmail)
     monkeypatch.setattr(mailer.time, "sleep", lambda seconds: None)  # keep tests fast
     # A test .env in the test's own temporary folder, never the real one.
-    # The BOM (﻿) is what Notepad sometimes adds; it must not matter.
+    # Notepad sometimes adds an invisible marker (a BOM, character number
+    # 0xFEFF) at the start of a file; it must not matter.
+    invisible_marker = chr(0xFEFF)
     (tmp_path / ".env").write_text(
-        "﻿GMAIL_ADDRESS=hr@example.com\nGMAIL_APP_PASSWORD=abcd efgh ijkl mnop\n", encoding="utf-8"
+        invisible_marker + "GMAIL_ADDRESS=hr@example.com\nGMAIL_APP_PASSWORD=wxyz wxyz wxyz wxyz\n", encoding="utf-8"
     )
 
 
@@ -139,7 +141,7 @@ def test_env_saved_as_txt_by_notepad_is_pointed_out(tmp_path):
 
 def test_app_password_spaces_are_removed(tmp_path):
     address, password = mailer.load_gmail_credentials(tmp_path / ".env")
-    assert password == "abcdefghijklmnop"
+    assert password == "wxyzwxyzwxyzwxyz"
 
 
 def test_stray_braces_in_message_do_not_crash():
@@ -162,3 +164,29 @@ def test_dry_run_and_failed_emails_are_not_remembered(tmp_path):
     send(make_people(tmp_path), tmp_path, dry_run=True)
     send(make_people(tmp_path, count=1), tmp_path)
     assert mailer.find_already_sent(make_people(tmp_path), "template-a", tmp_path / "history.csv") == []
+
+
+def test_example_values_left_in_env_are_pointed_out(tmp_path):
+    (tmp_path / ".env").write_text(
+        "GMAIL_ADDRESS=your.address@gmail.com\nGMAIL_APP_PASSWORD=abcd efgh ijkl mnop\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="still contains the example values"):
+        mailer.load_gmail_credentials(tmp_path / ".env")
+
+
+def test_gmail_error_is_not_reported_as_network_problem(monkeypatch, tmp_path):
+    def gmail_closes_connection(self, address, password):
+        raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+
+    monkeypatch.setattr(FakeGmail, "login", gmail_closes_connection)
+    with pytest.raises(ValueError, match="Gmail answered with an error: Connection unexpectedly closed"):
+        send(make_people(tmp_path), tmp_path)
+
+
+def test_real_network_problem_says_could_not_reach(monkeypatch, tmp_path):
+    def no_network(*args, **kwargs):
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(mailer.smtplib, "SMTP_SSL", no_network)
+    with pytest.raises(ValueError, match="Could not reach Gmail"):
+        send(make_people(tmp_path), tmp_path)
