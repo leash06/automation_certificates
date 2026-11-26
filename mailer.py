@@ -1,0 +1,129 @@
+"""Send each recipient their certificate by Gmail, with a delay and one retry."""
+
+import logging
+import os
+import smtplib
+import time
+from email.message import EmailMessage
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+ENV_FILE = Path(__file__).parent / ".env"
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 465  # SSL port: the connection is encrypted from the start
+
+# Gmail blocks accounts that send too fast, so we wait between emails.
+DELAY_BETWEEN_EMAILS_SECONDS = 1.5
+WAIT_BEFORE_RETRY_SECONDS = 5
+
+
+def load_gmail_credentials(env_file=ENV_FILE):
+    """Return (address, app password) from .env, or raise ValueError for HR."""
+    load_dotenv(env_file)
+    address = os.getenv("GMAIL_ADDRESS")
+    password = os.getenv("GMAIL_APP_PASSWORD")
+    if not address or not password:
+        raise ValueError(
+            "Gmail is not set up yet. Add GMAIL_ADDRESS and GMAIL_APP_PASSWORD "
+            "to the .env file (see .env.example)."
+        )
+    # Google shows App Passwords as 4 groups of 4 letters; the spaces are not part of it.
+    return address, password.replace(" ", "")
+
+
+def personalise(text, name):
+    # replace() instead of format(): a stray { or } typed by HR would make
+    # format() crash, while replace() only touches {name}.
+    return text.replace("{name}", name)
+
+
+def build_email(sender, person, messages):
+    body = messages["winner_body"] if person["status"] == "winner" else messages["participant_body"]
+    pdf_path = Path(person["pdf_path"])
+
+    email = EmailMessage()
+    email["From"] = sender
+    email["To"] = person["email"]
+    email["Subject"] = personalise(messages["subject"], person["name"])
+    email.set_content(personalise(body, person["name"]))
+    email.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=pdf_path.name)
+    return email
+
+
+def check_gmail_login(sender, password):
+    """Fail once with a clear message, instead of failing for every recipient."""
+    try:
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
+            server.login(sender, password)
+    except smtplib.SMTPAuthenticationError:
+        raise ValueError("Gmail refused the login. Check GMAIL_ADDRESS and GMAIL_APP_PASSWORD in the .env file.")
+    except OSError:
+        raise ValueError("Could not reach Gmail. Check the internet connection and try again.")
+
+
+def send_one_email(email, sender, password):
+    # A fresh connection per email: if Gmail drops the connection during a
+    # long batch, only that one email is affected, and the retry reconnects.
+    with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
+        server.login(sender, password)
+        server.send_message(email)
+
+
+def send_with_one_retry(email, sender, password):
+    """Return None if the email was sent, or the error text if both attempts failed."""
+    try:
+        send_one_email(email, sender, password)
+        return None
+    except (smtplib.SMTPException, OSError) as error:
+        logger.warning("First attempt to %s failed: %s", email["To"], error)
+
+    time.sleep(WAIT_BEFORE_RETRY_SECONDS)
+    try:
+        send_one_email(email, sender, password)
+        return None
+    except (smtplib.SMTPException, OSError) as error:
+        logger.error("Retry to %s failed: %s", email["To"], error)
+        return str(error)
+
+
+def send_certificates(generated_people, messages, dry_run=False, env_file=ENV_FILE):
+    """Email each person their PDF. Returns (sent, failed).
+
+    In a dry run every email is prepared (so missing PDFs are still caught)
+    but nothing is sent and Gmail is not contacted.
+    """
+    if dry_run:
+        sender, password = "dry-run", None
+    else:
+        sender, password = load_gmail_credentials(env_file)
+        check_gmail_login(sender, password)
+
+    sent = []
+    failed = []
+    for number, person in enumerate(generated_people):
+        try:
+            email = build_email(sender, person, messages)
+        except OSError as error:
+            failed.append({**person, "reason": f"Certificate file missing: {error}"})
+            continue
+
+        if dry_run:
+            logger.info("Dry run: email prepared for %s", person["email"])
+            sent.append(person)
+            continue
+
+        if number > 0:
+            time.sleep(DELAY_BETWEEN_EMAILS_SECONDS)
+        error_text = send_with_one_retry(email, sender, password)
+        if error_text:
+            failed.append({**person, "reason": f"Email not sent: {error_text}"})
+            continue
+        logger.info("Email sent to %s", person["email"])
+        sent.append(person)
+
+    outcome = "prepared (dry run, nothing sent)" if dry_run else "sent"
+    logger.info("Batch finished: %d %s, %d failed", len(sent), outcome, len(failed))
+    return sent, failed

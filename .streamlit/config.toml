@@ -1,0 +1,8 @@
+# The tool is used by a few HR staff on their own computer. Listening on
+# localhost only means nobody else on the network can open the app and
+# see the recipient list.
+[server]
+address = "localhost"
+
+[browser]
+gatherUsageStats = false

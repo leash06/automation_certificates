@@ -28,7 +28,11 @@ def load_settings(key, settings_file=SETTINGS_FILE):
 
 
 def save_settings(key, settings, settings_file=SETTINGS_FILE):
-    # Read first so saving one template keeps the settings of all the others.
+    """Add or update settings for one template, keeping everything else.
+
+    Placement and email messages are saved by different buttons, so saving
+    one must not erase the other, nor the settings of other templates.
+    """
     all_settings = read_all_settings(settings_file)
-    all_settings[key] = settings
+    all_settings[key] = {**all_settings.get(key, {}), **settings}
     settings_file.write_text(json.dumps(all_settings, indent=2, ensure_ascii=False), encoding="utf-8")

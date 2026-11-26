@@ -17,6 +17,7 @@ from PIL import ImageDraw
 from streamlit_image_coordinates import streamlit_image_coordinates
 
 from generator import FONTS_FOLDER, MIN_FONT_SIZE, draw_name, generate_certificates
+from mailer import send_certificates
 from people_loader import EMAIL_HEADERS, NAME_HEADERS, STATUS_HEADERS, clean_people, find_column, read_people_table
 from settings_store import load_settings, save_settings, template_key
 from template_loader import load_template
@@ -35,6 +36,20 @@ SAMPLE_NAMES = {
 }
 
 NO_COLUMN = "(none)"
+
+DEFAULT_MESSAGES = {
+    "subject": "Your certificate, {name}",
+    "winner_body": (
+        "Congratulations {name}!\n\n"
+        "You are one of our winners. Your certificate is attached.\n\n"
+        "Best regards,\nThe HR team"
+    ),
+    "participant_body": (
+        "Dear {name},\n\n"
+        "Thank you for taking part. Your certificate is attached.\n\n"
+        "Best regards,\nThe HR team"
+    ),
+}
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -69,17 +84,32 @@ def default_settings(template):
 def start_placement(key, template):
     """Fill the controls with this template's saved settings, or defaults."""
     saved = load_settings(key)
-    settings = saved or default_settings(template)
+    # Saved values win; defaults fill anything never saved (e.g. messages
+    # saved but placement not yet, or the reverse).
+    settings = {**default_settings(template), **DEFAULT_MESSAGES, **(saved or {})}
     if settings["font_file"] not in available_fonts():
         settings["font_file"] = available_fonts()[0]
 
     st.session_state.template_key = key
     st.session_state.saved_settings_found = saved is not None
+    # Certificates made with a previous template must not be emailed by mistake.
+    st.session_state.pop("generated", None)
     st.session_state.anchor = settings["anchor"]
     st.session_state.font_file = settings["font_file"]
     st.session_state.font_size = settings["font_size"]
     st.session_state.color = settings["color"]
     st.session_state.max_width = min(settings["max_width"], template.width)
+    st.session_state.subject = settings["subject"]
+    st.session_state.winner_body = settings["winner_body"]
+    st.session_state.participant_body = settings["participant_body"]
+
+
+def current_messages():
+    return {
+        "subject": st.session_state.subject,
+        "winner_body": st.session_state.winner_body,
+        "participant_body": st.session_state.participant_body,
+    }
 
 
 def current_settings():
@@ -254,6 +284,44 @@ def generation_section(template, settings, people):
             st.dataframe(pd.DataFrame(failed), hide_index=True)
 
 
+def email_section():
+    """Step 4: write the messages and send (or dry-run) the emails."""
+    generated = st.session_state.get("generated")
+    if not generated:
+        return
+
+    st.header("4. Send by email")
+    st.text_input("Subject", key="subject")
+    winner_box, participant_box = st.columns(2)
+    winner_box.text_area("Message for winners", key="winner_body", height=200)
+    participant_box.text_area("Message for participants", key="participant_body", height=200)
+    st.caption("{name} is replaced by each person's name.")
+    if st.button("Save messages for this template"):
+        save_settings(st.session_state.template_key, current_messages())
+        st.success("Messages saved for this template.")
+
+    # On by default: a real send cannot be undone, a dry run is harmless.
+    dry_run = st.checkbox("Dry run: prepare every email but send nothing", value=True)
+    button_label = f"Dry run for {len(generated)} emails" if dry_run else f"Send {len(generated)} emails"
+    if not st.button(button_label, type="primary"):
+        return
+
+    try:
+        with st.spinner("Preparing emails..." if dry_run else "Sending emails... this takes a few seconds per person."):
+            sent, failed = send_certificates(generated, current_messages(), dry_run)
+    except ValueError as error:
+        st.error(str(error))
+        return
+
+    if dry_run:
+        st.success(f"Dry run finished: {len(sent)} emails prepared, none sent.")
+    else:
+        st.success(f"{len(sent)} emails sent.")
+    if failed:
+        st.error(f"{len(failed)} emails could not be sent.")
+        st.dataframe(pd.DataFrame(failed), hide_index=True)
+
+
 def main():
     st.set_page_config(page_title="Certificate Generator", layout="wide")
     st.title("Certificate Generator")
@@ -265,6 +333,7 @@ def main():
     if not people:
         return
     generation_section(template, settings, people)
+    email_section()
 
 
 try:

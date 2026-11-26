@@ -18,6 +18,15 @@ def test_unknown_template_has_no_settings(tmp_path):
     assert load_settings("never-saved", tmp_path / "settings.json") is None
 
 
+def test_saving_messages_keeps_the_placement(tmp_path):
+    settings_file = tmp_path / "settings.json"
+    save_settings("template-a", SETTINGS, settings_file)
+    save_settings("template-a", {"subject": "Hello {name}"}, settings_file)
+    saved = load_settings("template-a", settings_file)
+    assert saved["anchor"] == [100, 200]
+    assert saved["subject"] == "Hello {name}"
+
+
 def test_saving_one_template_keeps_the_others(tmp_path):
     settings_file = tmp_path / "settings.json"
     save_settings("template-a", SETTINGS, settings_file)
