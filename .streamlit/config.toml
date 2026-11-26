@@ -7,9 +7,15 @@ address = "localhost"
 [browser]
 gatherUsageStats = false
 
+[client]
+# Hides the ⋮ menu and the Deploy button: HR does not need them, and light
+# or dark mode is switched with the button in the sidebar instead.
+toolbarMode = "minimal"
+
 # Look and feel, inspired by the Eduverse certificate flow: one blue accent,
 # soft borders and rounded corners. Both a light and a dark version exist;
-# HR switches between them in the app menu (top right) > Settings.
+# the app starts in the computer's mode and the sidebar button switches them
+# (see theme_toggle.py).
 [theme]
 # Inter comes from Google Fonts; without internet the app falls back to the
 # computer's normal font, so nothing breaks.

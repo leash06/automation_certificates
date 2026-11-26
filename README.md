@@ -48,8 +48,9 @@ computer can open it.
 ## How to use it
 
 The steps are separate screens, listed in the sidebar on the left; a step
-unlocks once the one before it is done. **Light or dark mode:** open the ⋮
-menu at the top right, then **Settings**, and choose the theme.
+unlocks once the one before it is done. The app opens in your computer's
+light or dark mode; the **Light mode / Dark mode** button at the bottom of
+the sidebar switches it.
 
 1. **Template and name placement:** upload a PNG, JPG or PDF. Drag the
    name to move it, like in Canva, or click where its centre should be.
@@ -111,6 +112,7 @@ python generator.py       # make 3 sample PDFs in output/ from the sample templa
 | `settings_store.py` | Saves placement and the email message per template in `settings.json` |
 | `font_library.py` | Lists fonts, adds uploaded fonts, downloads Google Fonts |
 | `placement_canvas.py` | Template preview where the name is dragged smoothly in the browser |
+| `theme_toggle.py` | Animated light/dark mode button |
 | `tests/` | Automated tests (Gmail is replaced by a fake, nothing is sent) |
 
 Not stored in Git: `.env`, `output/`, `settings.json`, logs, and any `.csv` or

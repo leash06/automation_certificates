@@ -25,6 +25,7 @@ from people_loader import EMAIL_HEADERS, NAME_HEADERS, clean_people, find_column
 from placement_canvas import image_data_url, placement_canvas
 from settings_store import load_settings, save_settings, template_key
 from template_loader import load_template
+from theme_toggle import theme_toggle
 
 PROJECT_FOLDER = Path(__file__).parent
 OUTPUT_FOLDER = PROJECT_FOLDER / "output"
@@ -343,7 +344,7 @@ def sidebar(page, template_ready, people_ready):
                 args=(page_id,),
             )
         st.divider()
-        st.caption(":material/dark_mode: Light or dark mode: open the ⋮ menu at the top right, then **Settings**.")
+        theme_toggle()
 
 
 # ------------------------------------------------------ screen 1: design
