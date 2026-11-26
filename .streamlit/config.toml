@@ -6,3 +6,46 @@ address = "localhost"
 
 [browser]
 gatherUsageStats = false
+
+# Look and feel, inspired by the Eduverse certificate flow: one blue accent,
+# soft borders and rounded corners. Both a light and a dark version exist;
+# HR switches between them in the app menu (top right) > Settings.
+[theme]
+# Inter comes from Google Fonts; without internet the app falls back to the
+# computer's normal font, so nothing breaks.
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+baseFontSize = 15
+baseRadius = "10px"
+buttonRadius = "10px"
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.light]
+primaryColor = "#4C6FFF"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F6F8"
+textColor = "#16181D"
+borderColor = "#E6E8EC"
+linkColor = "#4C6FFF"
+
+[theme.light.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#EEF1FF"
+textColor = "#16181D"
+borderColor = "#E6E8EC"
+
+[theme.dark]
+primaryColor = "#6F8BFF"
+backgroundColor = "#0F1115"
+secondaryBackgroundColor = "#1A1D24"
+textColor = "#E8EAF0"
+borderColor = "#2A2E37"
+linkColor = "#8DA2FF"
+
+[theme.dark.sidebar]
+backgroundColor = "#13161C"
+secondaryBackgroundColor = "#1E2233"
+textColor = "#E8EAF0"
+borderColor = "#2A2E37"

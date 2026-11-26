@@ -1,9 +1,10 @@
-"""Streamlit interface for HR: place the name, check the list, preview every
-certificate, then send them by email or download them.
+"""Streamlit interface for HR: design the certificate, check the list,
+preview every certificate, then send them by email or download them.
 
-This file only collects choices and shows results. Drawing lives in
-generator.py, reading files in the loaders and sending in mailer.py, so the
-logic can be tested without a browser.
+The steps are separate screens, chosen in the sidebar. This file only
+collects choices and shows results. Drawing lives in generator.py, reading
+files in the loaders and sending in mailer.py, so the logic can be tested
+without a browser.
 
 Run with:  streamlit run app.py
 """
@@ -32,20 +33,35 @@ LOG_FILE = PROJECT_FOLDER / "certificates.log"
 # The template is about 3500 px wide. The live preview is drawn on a copy
 # this wide, which is about 12 times fewer pixels, so it updates quickly.
 PREVIEW_WIDTH = 1000
-# The gallery shows small certificates, drawn on an even smaller copy.
-THUMBNAIL_WIDTH = 600
-GALLERY_COLUMNS = 3
-GALLERY_PAGE_SIZE = 9
-CAPTION_LENGTH = 40
+# The preview list shows small certificates, drawn on an even smaller copy.
+THUMBNAIL_WIDTH = 360
+ROWS_PER_PAGE = 8
 # The full-size view is reduced to this width so it loads quickly.
 FULL_VIEW_WIDTH = 1600
 MAX_FONT_SIZE = 2000
 
 DEFAULT_FONT = "GreatVibes-Regular.ttf"
+DEFAULT_TEST_NAME = "Amina Bello"
 
 MOVE_NAME = "Move name"
 PICK_COLOUR = "Pick colour"
 MOUSE_ICONS = {MOVE_NAME: ":material/open_with:", PICK_COLOUR: ":material/colorize:"}
+
+# The screens, in order: (id, label in the sidebar, icon).
+PAGES = [
+    ("design", "Design", ":material/edit_square:"),
+    ("recipients", "Recipients", ":material/group:"),
+    ("preview", "Preview", ":material/photo_library:"),
+    ("deliver", "Send or download", ":material/send:"),
+    ("report", "Report", ":material/fact_check:"),
+]
+
+# Streamlit forgets a widget's value when its screen is not shown. These
+# values are kept alive by keep_widget_values() so HR can switch screens.
+KEPT_WIDGET_KEYS = (
+    "font_file", "font_size", "color", "max_width", "test_name", "click_mode",
+    "name_column", "email_column", "subject", "message_template", "preview_search",
+)
 
 DEFAULT_MESSAGES = {
     "subject": "Your certificate, {name}",
@@ -55,6 +71,14 @@ DEFAULT_MESSAGES = {
         "Best regards,\nThe HR team"
     ),
 }
+
+# Purely cosmetic: left-align the sidebar menu, like a normal navigation menu.
+SIDEBAR_CSS = """
+<style>
+section[data-testid="stSidebar"] .stButton button { justify-content: flex-start; }
+section[data-testid="stSidebar"] .stButton button > div { justify-content: flex-start; }
+</style>
+"""
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -131,7 +155,19 @@ def name_layer(template, key, name, settings):
     return layer, name_box
 
 
-# ---------------------------------------------------------------- settings
+# ------------------------------------------------------------- app state
+
+def keep_widget_values():
+    # Writing a value back into its own key tells Streamlit to keep it even
+    # while the widget's screen is hidden.
+    for widget_key in KEPT_WIDGET_KEYS:
+        if widget_key in st.session_state:
+            st.session_state[widget_key] = st.session_state[widget_key]
+
+
+def go_to(page):
+    st.session_state.page = page
+
 
 def default_settings(template):
     fonts = available_fonts()
@@ -163,7 +199,6 @@ def start_placement(key, template):
         settings["font_file"] = available_fonts()[0]
 
     st.session_state.template_key = key
-    st.session_state.saved_settings_found = saved is not None
     # Results made with a previous template must not be sent by mistake.
     clear_results()
     st.session_state.anchor = settings["anchor"]
@@ -173,6 +208,8 @@ def start_placement(key, template):
     st.session_state.max_width = min(settings["max_width"], template.width)
     st.session_state.subject = settings["subject"]
     st.session_state.message_template = settings["message_template"]
+    st.session_state.setdefault("test_name", DEFAULT_TEST_NAME)
+    st.session_state.setdefault("click_mode", MOVE_NAME)
 
 
 def current_messages():
@@ -203,32 +240,121 @@ def apply_pending_changes():
             st.session_state[widget_key] = st.session_state.pop(pending_key)
 
 
-# ------------------------------------------------- step 1: template and name
+def store_template(uploaded):
+    """Check and keep an uploaded template. Returns True if it was accepted."""
+    file_bytes = uploaded.getvalue()
+    try:
+        template = read_template(uploaded.name, file_bytes)
+    except ValueError as error:
+        st.error(str(error))
+        return False
+    # Uploaded files disappear when their screen is hidden, so the bytes are kept here.
+    st.session_state.template_name = uploaded.name
+    st.session_state.template_bytes = file_bytes
+    key = template_key(file_bytes)
+    logger.info("Template uploaded: %s (%s)", uploaded.name, key)
+    start_placement(key, template)
+    return True
 
-def template_section():
-    """Step 1: upload the template and place the name. Returns the template."""
-    with st.container(border=True):
-        st.subheader("1. Template and name placement")
-        uploaded = st.file_uploader("Certificate template (PNG, JPG or PDF)", key="template_file")
-        if uploaded is None:
-            return None
 
-        file_bytes = uploaded.getvalue()
-        try:
-            template = read_template(uploaded.name, file_bytes)
-        except ValueError as error:
-            st.error(str(error))
-            return None
+def current_template():
+    if "template_bytes" not in st.session_state:
+        return None
+    return read_template(st.session_state.template_name, st.session_state.template_bytes)
 
-        key = template_key(file_bytes)
-        if st.session_state.get("template_key") != key:
-            logger.info("Template uploaded: %s (%s)", uploaded.name, key)
-            start_placement(key, template)
-        if st.session_state.saved_settings_found:
-            st.info("The saved placement and message for this template were loaded.", icon=":material/bookmark:")
 
-        placement_editor(template, key, uploaded.name)
-    return template
+def store_people_list(uploaded):
+    """Check and keep an uploaded recipient list. Returns True if it was accepted."""
+    try:
+        table = read_people_table(uploaded.name, uploaded.getvalue())
+    except ValueError as error:
+        st.error(str(error))
+        return False
+    st.session_state.people_name = uploaded.name
+    st.session_state.people_bytes = uploaded.getvalue()
+    columns = list(table.columns)
+    st.session_state.name_column = find_column(columns, NAME_HEADERS)
+    st.session_state.email_column = find_column(columns, EMAIL_HEADERS)
+    return True
+
+
+def current_people():
+    """Return (table, people, rejected) for the stored list, or None if there
+    is no list or its columns are not chosen yet."""
+    if "people_bytes" not in st.session_state:
+        return None
+    table = read_people_table(st.session_state.people_name, st.session_state.people_bytes)
+    name_column = st.session_state.get("name_column")
+    email_column = st.session_state.get("email_column")
+    if name_column not in table.columns or email_column not in table.columns:
+        return table, [], []
+    people, rejected = clean_people(table, name_column, email_column)
+    return table, people, rejected
+
+
+# ----------------------------------------------------------- page pieces
+
+def top_bar(location):
+    """Breadcrumb on the left; returns a container on the right for buttons."""
+    crumb, actions = st.columns([2, 3], vertical_alignment="center")
+    crumb.markdown(f":gray[:material/workspace_premium: Certificates]&nbsp;&nbsp;:gray[›]&nbsp;&nbsp;**{location}**")
+    return actions.container(horizontal=True, horizontal_alignment="right", vertical_alignment="center")
+
+
+def page_heading(title, subtitle):
+    # Centred, like the page titles in the design; the text is fixed, never
+    # typed by a user, so writing it as HTML is safe.
+    st.markdown(
+        f"<div style='text-align:center;padding:1.25rem 0 1.5rem'>"
+        f"<h1 style='margin:0 0 .4rem'>{title}</h1>"
+        f"<p style='opacity:.6;margin:0'>{subtitle}</p></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def sidebar(page, template_ready, people_ready):
+    available = {
+        "design": True,
+        "recipients": template_ready,
+        "preview": template_ready and people_ready,
+        "deliver": template_ready and people_ready,
+        "report": "email_sent" in st.session_state,
+    }
+    done = {
+        "design": template_ready,
+        "recipients": people_ready,
+        "preview": False,
+        "deliver": "email_sent" in st.session_state,
+        "report": False,
+    }
+    with st.sidebar:
+        st.html(SIDEBAR_CSS)
+        st.markdown("### :blue[:material/workspace_premium:] Certificates")
+        st.caption("Design, check and send certificates in a few steps.")
+        for page_id, label, icon in PAGES:
+            st.button(
+                label,
+                key=f"nav_{page_id}",
+                icon=":material/check_circle:" if done[page_id] and page_id != page else icon,
+                type="primary" if page_id == page else "tertiary",
+                width="stretch",
+                disabled=not available[page_id],
+                on_click=go_to,
+                args=(page_id,),
+            )
+        st.divider()
+        st.caption(":material/dark_mode: Light or dark mode: open the ⋮ menu at the top right, then **Settings**.")
+
+
+# ------------------------------------------------------ screen 1: design
+
+def upload_template_screen():
+    top_bar("Design")
+    page_heading("Create your certificate", "Upload your certificate design, then place the name on it.")
+    _, middle, _ = st.columns([1, 3, 1])
+    uploaded = middle.file_uploader("Certificate template: PNG, JPG or PDF", key="template_upload")
+    if uploaded and store_template(uploaded):
+        st.rerun()
 
 
 def select_new_font(file_name):
@@ -237,8 +363,7 @@ def select_new_font(file_name):
     st.rerun(scope="fragment")
 
 
-def font_controls():
-    st.selectbox("Font", available_fonts(), key="font_file", format_func=font_display_name)
+def add_font_popover():
     with st.popover("Add a font", icon=":material/add:", width="stretch"):
         google_name = st.text_input("Google Font name", placeholder="e.g. Playfair Display", help="Browse the free fonts at fonts.google.com")
         if st.button("Download from Google Fonts", icon=":material/cloud_download:", width="stretch"):
@@ -260,12 +385,10 @@ def font_controls():
 
 def placement_toolbar(template):
     """Mouse mode and centring buttons, in one row above the preview."""
-    toolbar = st.container(horizontal=True, vertical_alignment="center")
-    with toolbar:
+    with st.container(horizontal=True, vertical_alignment="center"):
         click_mode = st.segmented_control(
             "Mouse",
             [MOVE_NAME, PICK_COLOUR],
-            default=MOVE_NAME,
             key="click_mode",
             format_func=lambda mode: f"{MOUSE_ICONS[mode]} {mode}",
             label_visibility="collapsed",
@@ -300,37 +423,53 @@ def handle_canvas_gesture(gesture, template):
         st.session_state.anchor = [x, y]
 
 
+def placement_is_saved(key):
+    saved = load_settings(key) or {}
+    return all(saved.get(name) == value for name, value in current_settings().items())
+
+
 @st.fragment
-def placement_editor(template, key, template_name):
-    """Font, size, colour, position and live preview.
+def design_editor(template, key):
+    """The editor: settings on the left, the certificate on the right.
 
     A fragment reruns on its own: changing the placement redraws only this
-    part, not the rest of the page, so it stays fast.
+    screen, not the whole app, so it stays fast.
     """
     apply_pending_changes()
-    tools, canvas = st.columns([1, 3], gap="large")
-    with tools:
-        font_controls()
-        size_box, colour_box = st.columns([3, 2], vertical_alignment="bottom")
-        size_box.number_input("Size", min_value=MIN_FONT_SIZE, max_value=MAX_FONT_SIZE, step=5, key="font_size")
-        colour_box.color_picker("Colour", key="color")
-        st.slider("Maximum name width", min_value=100, max_value=template.width, step=10, key="max_width")
-        test_name = st.text_input(
-            "Try a name",
-            value="Amina Bello",
-            key="test_name",
-            help="Try your longest name, and one with accents (é, ç, ñ), to check they fit.",
-        )
-        if st.button("Save placement", icon=":material/save:", type="primary", width="stretch"):
+    actions = top_bar("Design")
+    with actions:
+        if placement_is_saved(key):
+            st.markdown(":green[:material/cloud_done: Saved]")
+        elif st.button("Save", icon=":material/save:"):
             save_settings(key, current_settings())
-            st.session_state.saved_settings_found = True
-            logger.info("Saved placement for template %s (%s)", template_name, key)
-            st.toast("Placement saved for this template.", icon=":material/check_circle:")
+            logger.info("Saved placement for template %s (%s)", st.session_state.template_name, key)
+            st.rerun(scope="fragment")
+        if st.button("Continue", icon=":material/arrow_forward:", icon_position="right", type="primary"):
+            go_to("recipients")
+            st.rerun()
+
+    panel, canvas = st.columns([1, 3], gap="large")
+    with panel:
+        text_tab, template_tab = st.tabs(["Text", "Template"])
+        with text_tab:
+            st.selectbox("Font", available_fonts(), key="font_file", format_func=font_display_name)
+            add_font_popover()
+            size_box, colour_box = st.columns([3, 2], vertical_alignment="bottom")
+            size_box.number_input("Size", min_value=MIN_FONT_SIZE, max_value=MAX_FONT_SIZE, step=5, key="font_size")
+            colour_box.color_picker("Colour", key="color")
+            st.slider("Maximum name width", min_value=100, max_value=template.width, step=10, key="max_width")
+            st.text_input("Try a name", key="test_name", help="Try your longest name, and one with accents (é, ç, ñ), to check they fit.")
+        with template_tab:
+            st.markdown(f":material/image: **{st.session_state.template_name}**")
+            st.caption(f"{template.width} × {template.height} pixels")
+            replacement = st.file_uploader("Replace the template", key="template_replace")
+            if replacement and replacement.getvalue() != st.session_state.template_bytes and store_template(replacement):
+                st.rerun()
 
     with canvas:
         click_mode = placement_toolbar(template)
         settings = current_settings()
-        layer, name_box = name_layer(template, key, test_name or "Amina Bello", settings)
+        layer, name_box = name_layer(template, key, st.session_state.test_name or DEFAULT_TEST_NAME, settings)
         gesture = placement_canvas(
             background_url(template, key),
             layer,
@@ -345,56 +484,59 @@ def placement_editor(template, key, template_name):
             st.rerun(scope="fragment")
 
 
-# ---------------------------------------------------------- step 2: people
+def design_page(template):
+    if template is None:
+        upload_template_screen()
+        return
+    design_editor(template, st.session_state.template_key)
 
-def choose_column(label, columns, detected_column):
-    index = columns.index(detected_column) if detected_column in columns else None
-    return st.selectbox(label, columns, index=index, placeholder="Choose the column...")
 
+# -------------------------------------------------- screen 2: recipients
 
-def people_section():
-    """Step 2: upload and check the recipient list. Returns the valid people."""
-    with st.container(border=True):
-        st.subheader("2. Recipients")
-        uploaded = st.file_uploader("Recipient list (Excel .xlsx, CSV, or Google Form export)", key="people_file")
-        if uploaded is None:
-            return []
+def recipients_page(people_state):
+    people = people_state[1] if people_state else []
+    actions = top_bar("Recipients")
+    with actions:
+        st.button("Back", icon=":material/arrow_back:", on_click=go_to, args=("design",))
+        st.button("Continue", icon=":material/arrow_forward:", icon_position="right", type="primary",
+                  disabled=not people, on_click=go_to, args=("preview",))
+    page_heading("Recipients", "Upload the list of people who receive a certificate: a name and an email for each.")
 
-        try:
-            table = read_people_table(uploaded.name, uploaded.getvalue())
-        except ValueError as error:
-            st.error(str(error))
-            return []
+    _, middle, _ = st.columns([1, 4, 1])
+    with middle:
+        label = "Replace the list" if people_state else "Excel (.xlsx), CSV, or Google Form export"
+        uploaded = st.file_uploader(label, key="people_upload")
+        if uploaded and uploaded.getvalue() != st.session_state.get("people_bytes") and store_people_list(uploaded):
+            st.rerun()
+        if not people_state:
+            return
 
+        table, people, rejected = people_state
+        st.markdown(f":material/table: **{st.session_state.people_name}** · {len(table)} rows")
         columns = list(table.columns)
         name_box, email_box = st.columns(2)
-        with name_box:
-            name_column = choose_column("Name column", columns, find_column(columns, NAME_HEADERS))
-        with email_box:
-            email_column = choose_column("Email column", columns, find_column(columns, EMAIL_HEADERS))
-        if name_column is None or email_column is None:
+        name_box.selectbox("Name column", columns, key="name_column", placeholder="Choose the column...")
+        email_box.selectbox("Email column", columns, key="email_column", placeholder="Choose the column...")
+        if st.session_state.name_column is None or st.session_state.email_column is None:
             st.warning("Choose which columns contain the names and the emails.")
-            return []
+            return
 
-        people, rejected = clean_people(table, name_column, email_column)
-        st.session_state.rejected_rows = rejected
         # Streamlit reruns this on every click; log each list only once.
-        list_summary = (uploaded.name, name_column, email_column, len(people), len(rejected))
+        list_summary = (st.session_state.people_name, st.session_state.name_column, st.session_state.email_column, len(people), len(rejected))
         if st.session_state.get("logged_list") != list_summary:
             st.session_state.logged_list = list_summary
-            logger.info("Recipient list %s: %d valid, %d skipped", uploaded.name, len(people), len(rejected))
+            logger.info("Recipient list %s: %d valid, %d skipped", st.session_state.people_name, len(people), len(rejected))
 
-        valid_count, skipped_count = st.columns(2)
-        valid_count.metric("Valid recipients", len(people))
-        skipped_count.metric("Skipped rows", len(rejected))
+        with st.container(border=True, horizontal=True):
+            st.metric("Valid recipients", len(people))
+            st.metric("Skipped rows", len(rejected))
         if rejected:
             with st.expander(f"Why {len(rejected)} rows will be skipped"):
                 st.dataframe(pd.DataFrame(rejected), hide_index=True, width="stretch")
                 st.caption("Fix them in your file and upload it again if needed.")
-    return people
 
 
-# --------------------------------------------------------- step 3: preview
+# ----------------------------------------------------- screen 3: preview
 
 @st.dialog("Certificate", width="large")
 def show_full_certificate(template, person, settings):
@@ -415,48 +557,63 @@ def reset_preview_page():
 
 
 @st.fragment
-def preview_section(template, people):
-    """Step 3: every certificate, page by page. A fragment, so turning pages
-    redraws only this part."""
-    with st.container(border=True):
-        st.subheader("3. Preview all certificates")
-        search = st.text_input(
-            "Search",
-            placeholder="Search a name or email...",
-            key="preview_search",
-            label_visibility="collapsed",
-            on_change=reset_preview_page,
-        ).strip().lower()
-        shown = [person for person in people if search in person["name"].lower() or search in person["email"].lower()]
-        if not shown:
-            st.info("No one matches this search.")
-            return
+def preview_list(template, people):
+    """Every certificate as a list, page by page, like the design's
+    certificate list. A fragment, so turning pages redraws only the list."""
+    search_box, _ = st.columns([2, 3])
+    search = search_box.text_input(
+        "Search",
+        placeholder="Search a name or email...",
+        key="preview_search",
+        label_visibility="collapsed",
+        icon=":material/search:",
+        on_change=reset_preview_page,
+    ).strip().lower()
+    shown = [person for person in people if search in person["name"].lower() or search in person["email"].lower()]
+    if not shown:
+        st.info("No one matches this search.")
+        return
 
-        page_count = math.ceil(len(shown) / GALLERY_PAGE_SIZE)
-        page = min(max(st.session_state.get("preview_page", 1), 1), page_count)
-        first = (page - 1) * GALLERY_PAGE_SIZE
+    page_count = math.ceil(len(shown) / ROWS_PER_PAGE)
+    page = min(max(st.session_state.get("preview_page", 1), 1), page_count)
+    first = (page - 1) * ROWS_PER_PAGE
+    page_people = shown[first:first + ROWS_PER_PAGE]
 
-        navigation = st.container(horizontal=True, vertical_alignment="center", horizontal_alignment="center")
-        with navigation:
-            st.button("Previous", icon=":material/chevron_left:", disabled=page <= 1, on_click=change_preview_page, args=(-1,))
-            st.markdown(f"Page **{page}** of **{page_count}** · {len(shown)} certificates")
-            st.button("Next", icon=":material/chevron_right:", icon_position="right", disabled=page >= page_count, on_click=change_preview_page, args=(1,))
-
-        settings = current_settings()
-        scale = THUMBNAIL_WIDTH / template.width
-        small_template = scaled_template(template, st.session_state.template_key, scale)
-        columns = st.columns(GALLERY_COLUMNS)
-        for position, person in enumerate(shown[first:first + GALLERY_PAGE_SIZE]):
-            with columns[position % GALLERY_COLUMNS]:
-                # Long names are shortened so every caption takes one line
-                # and the buttons stay aligned; the full view shows it all.
-                caption = person["name"] if len(person["name"]) <= CAPTION_LENGTH else person["name"][:CAPTION_LENGTH - 1] + "…"
-                st.image(draw_name(small_template, person["name"], settings, scale), caption=caption)
-                if st.button("View full size", key=f"view_{first + position}", icon=":material/zoom_in:", width="stretch"):
+    settings = current_settings()
+    scale = THUMBNAIL_WIDTH / template.width
+    small_template = scaled_template(template, st.session_state.template_key, scale)
+    with st.container(border=True, gap="small"):
+        for position, person in enumerate(page_people):
+            if position > 0:
+                st.divider()
+            with st.container(horizontal=True, vertical_alignment="center", gap="medium"):
+                st.image(draw_name(small_template, person["name"], settings, scale), width=180)
+                with st.container(width="stretch"):
+                    st.markdown(f"**{person['name']}**")
+                    st.caption(person["email"])
+                if st.button("Preview", key=f"preview_{first + position}", icon=":material/image:"):
                     show_full_certificate(template, person, settings)
 
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.button("", icon=":material/chevron_left:", key="previous_page", help="Previous page",
+                  disabled=page <= 1, on_click=change_preview_page, args=(-1,))
+        st.button("", icon=":material/chevron_right:", key="next_page", help="Next page",
+                  disabled=page >= page_count, on_click=change_preview_page, args=(1,))
+        st.space("stretch")
+        st.markdown(f"Showing **{first + 1}–{first + len(page_people)}** of **{len(shown)}** certificates")
 
-# ------------------------------------------------ step 4: send or download
+
+def preview_page(template, people):
+    actions = top_bar("Preview")
+    with actions:
+        st.button("Back", icon=":material/arrow_back:", on_click=go_to, args=("recipients",))
+        st.button("Continue", icon=":material/arrow_forward:", icon_position="right", type="primary",
+                  on_click=go_to, args=("deliver",))
+    page_heading("Preview all certificates", "Every certificate exactly as it will be created. Open one to see it full size.")
+    preview_list(template, people)
+
+
+# --------------------------------------------- screen 4: send or download
 
 def create_certificates(template, people):
     """Create one PDF per person in a new dated folder. Returns the people with their PDF path."""
@@ -466,7 +623,7 @@ def create_certificates(template, people):
         generated, failed = generate_certificates(template, people, current_settings(), batch_folder)
     st.session_state.generation_failed = failed
     if failed:
-        st.error(f"{len(failed)} certificates could not be created. See the report below.")
+        st.error(f"{len(failed)} certificates could not be created. See the report.")
     return generated
 
 
@@ -497,36 +654,32 @@ def skip_people_already_sent(people):
 
 def email_card(template, people):
     with st.container(border=True):
-        st.markdown("#### :material/mail: Send by email")
+        st.markdown("#### :blue[:material/mail:] Send by email")
+        st.caption("Each person gets their own certificate as a PDF attachment.")
         st.text_input("Subject", key="subject")
-        st.text_area("Message template", key="message_template", height=180)
-        st.caption("{name} is replaced by each person's name. Each person gets their own certificate as a PDF attachment.")
+        st.text_area("Message template", key="message_template", height=180, help="{name} is replaced by each person's name.")
         recipients = skip_people_already_sent(people)
+        if not recipients:
+            st.info("Everyone in this list already received this certificate. Nothing to send.")
 
-        actions = st.container(horizontal=True)
-        with actions:
+        with st.container(horizontal=True, horizontal_alignment="right"):
             if st.button("Save message", icon=":material/save:"):
                 save_settings(st.session_state.template_key, current_messages())
                 logger.info("Saved email message for template %s", st.session_state.template_key)
                 st.toast("Message saved for this template.", icon=":material/check_circle:")
-            send_clicked = st.button(
-                f"Send {len(recipients)} emails",
-                icon=":material/send:",
-                type="primary",
-                disabled=not recipients,
-            )
-        if not recipients:
-            st.info("Everyone in this list already received this certificate. Nothing to send.")
+            send_clicked = st.button(f"Send {len(recipients)} emails", icon=":material/send:", type="primary", disabled=not recipients)
         if send_clicked:
             generated = create_certificates(template, recipients)
             result = send_emails(generated) if generated else None
             if result:
                 st.session_state.email_sent, st.session_state.email_failed = result
+                go_to("report")
+                st.rerun()
 
 
 def download_card(template, people):
     with st.container(border=True):
-        st.markdown("#### :material/download: Download")
+        st.markdown("#### :blue[:material/download:] Download")
         st.caption("Create every certificate as a PDF and download them all in one ZIP file, without sending any email.")
         if st.button(f"Create {len(people)} certificates", icon=":material/picture_as_pdf:", width="stretch"):
             generated = create_certificates(template, people)
@@ -546,18 +699,19 @@ def download_card(template, people):
             )
 
 
-def delivery_section(template, people):
-    """Step 4: send everyone their certificate, or download them all."""
-    with st.container(border=True):
-        st.subheader("4. Send or download")
-        email_column, download_column = st.columns([3, 2], gap="large")
-        with email_column:
-            email_card(template, people)
-        with download_column:
-            download_card(template, people)
+def deliver_page(template, people):
+    actions = top_bar("Send or download")
+    with actions:
+        st.button("Back", icon=":material/arrow_back:", on_click=go_to, args=("preview",))
+    page_heading("Send or download", f"{len(people)} certificates are ready. Email them to everyone, or download them all.")
+    email_column, download_column = st.columns([3, 2], gap="large")
+    with email_column:
+        email_card(template, people)
+    with download_column:
+        download_card(template, people)
 
 
-# ---------------------------------------------------------- step 5: report
+# ------------------------------------------------------ screen 5: report
 
 def problem_rows():
     """Everyone who did not get a certificate by email, with the reason.
@@ -573,67 +727,83 @@ def problem_rows():
     return rows
 
 
-def report_section():
-    """Step 5: counts, failed.csv, and resending to the failed emails."""
-    if "email_sent" not in st.session_state:
+def report_page():
+    top_bar("Report")
+    page_heading("Report", "What happened to each certificate.")
+    email_failed = st.session_state.email_failed
+
+    with st.container(border=True, horizontal=True):
+        st.metric("Sent", len(st.session_state.email_sent))
+        st.metric("Failed", len(st.session_state.get("generation_failed", [])) + len(email_failed))
+        st.metric("Skipped", len(st.session_state.get("rejected_rows", [])))
+
+    rows = problem_rows()
+    if not rows:
+        st.success("Everyone received their certificate.", icon=":material/check_circle:")
         return
 
-    email_failed = st.session_state.email_failed
-    with st.container(border=True):
-        st.subheader("5. Report")
-        sent_count, failed_count, skipped_count = st.columns(3)
-        sent_count.metric("Sent", len(st.session_state.email_sent))
-        failed_count.metric("Failed", len(st.session_state.get("generation_failed", [])) + len(email_failed))
-        skipped_count.metric("Skipped", len(st.session_state.get("rejected_rows", [])))
+    problems = pd.DataFrame(rows)
+    st.dataframe(problems, hide_index=True, width="stretch")
+    st.caption("To fix skipped rows: correct them in failed.csv, then upload it as the recipient list.")
+    with st.container(horizontal=True):
+        # utf-8-sig adds a marker that tells Excel the file is UTF-8, so
+        # names like Hélène are not shown as HÃ©lÃ¨ne when HR opens it.
+        st.download_button(
+            "Download failed.csv",
+            data=problems.to_csv(index=False).encode("utf-8-sig"),
+            file_name="failed.csv",
+            mime="text/csv",
+            icon=":material/download:",
+            on_click="ignore",
+        )
+        resend_clicked = bool(email_failed) and st.button(
+            f"Resend to the {len(email_failed)} failed emails", icon=":material/replay:", type="primary"
+        )
+    if resend_clicked:
+        logger.info("Resending to %d failed recipients", len(email_failed))
+        result = send_emails(email_failed)
+        if result:
+            newly_sent, still_failed = result
+            st.session_state.email_sent = st.session_state.email_sent + newly_sent
+            st.session_state.email_failed = still_failed
+            # The counts above were drawn before the resend; redraw them.
+            st.rerun()
 
-        rows = problem_rows()
-        if not rows:
-            st.success("Everyone received their certificate.", icon=":material/check_circle:")
-            return
 
-        problems = pd.DataFrame(rows)
-        st.dataframe(problems, hide_index=True, width="stretch")
-        st.caption("To fix skipped rows: correct them in failed.csv, then upload it as the recipient list.")
-        actions = st.container(horizontal=True)
-        with actions:
-            # utf-8-sig adds a marker that tells Excel the file is UTF-8, so
-            # names like Hélène are not shown as HÃ©lÃ¨ne when HR opens it.
-            st.download_button(
-                "Download failed.csv",
-                data=problems.to_csv(index=False).encode("utf-8-sig"),
-                file_name="failed.csv",
-                mime="text/csv",
-                icon=":material/download:",
-                on_click="ignore",
-            )
-            resend_clicked = bool(email_failed) and st.button(
-                f"Resend to the {len(email_failed)} failed emails", icon=":material/replay:", type="primary"
-            )
-        if resend_clicked:
-            logger.info("Resending to %d failed recipients", len(email_failed))
-            result = send_emails(email_failed)
-            if result:
-                newly_sent, still_failed = result
-                st.session_state.email_sent = st.session_state.email_sent + newly_sent
-                st.session_state.email_failed = still_failed
-                # The counts above were drawn before the resend; redraw them.
-                st.rerun()
-
+# ------------------------------------------------------------------ main
 
 def main():
-    st.set_page_config(page_title="Certificate Generator", page_icon=":material/workspace_premium:", layout="wide")
-    st.title("Certificate Generator")
-    st.caption("Place the name on your template, check your list, preview every certificate, then send or download them.")
+    st.set_page_config(page_title="Certificates", page_icon=":material/workspace_premium:", layout="wide")
+    keep_widget_values()
 
-    template = template_section()
-    if template is None:
-        return
-    people = people_section()
-    if not people:
-        return
-    preview_section(template, people)
-    delivery_section(template, people)
-    report_section()
+    template = current_template()
+    people_state = current_people() if template is not None else None
+    people = people_state[1] if people_state else []
+    if people_state:
+        st.session_state.rejected_rows = people_state[2]
+
+    page = st.session_state.setdefault("page", "design")
+    # A screen that is not available yet (e.g. after replacing the template)
+    # falls back to the design screen.
+    if page in ("recipients",) and template is None:
+        page = "design"
+    if page in ("preview", "deliver") and not people:
+        page = "recipients" if template is not None else "design"
+    if page == "report" and "email_sent" not in st.session_state:
+        page = "deliver" if people else "design"
+    st.session_state.page = page
+
+    sidebar(page, template is not None, bool(people))
+    if page == "design":
+        design_page(template)
+    elif page == "recipients":
+        recipients_page(people_state)
+    elif page == "preview":
+        preview_page(template, people)
+    elif page == "deliver":
+        deliver_page(template, people)
+    else:
+        report_page()
 
 
 try:

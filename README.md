@@ -47,6 +47,10 @@ computer can open it.
 
 ## How to use it
 
+The steps are separate screens, listed in the sidebar on the left; a step
+unlocks once the one before it is done. **Light or dark mode:** open the ⋮
+menu at the top right, then **Settings**, and choose the theme.
+
 1. **Template and name placement:** upload a PNG, JPG or PDF. Drag the
    name to move it, like in Canva, or click where its centre should be.
    Drag a corner handle of the purple box to make it bigger or smaller.
