@@ -16,7 +16,8 @@ import streamlit as st
 from PIL import ImageDraw
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-from generator import FONTS_FOLDER, MIN_FONT_SIZE, draw_name, generate_certificates
+from font_library import add_font_file, available_fonts, download_google_font, font_display_name
+from generator import MIN_FONT_SIZE, draw_name, generate_certificates
 from mailer import find_already_sent, send_certificates
 from people_loader import EMAIL_HEADERS, NAME_HEADERS, STATUS_HEADERS, clean_people, find_column, read_people_table
 from settings_store import load_settings, save_settings, template_key
@@ -26,8 +27,18 @@ PROJECT_FOLDER = Path(__file__).parent
 OUTPUT_FOLDER = PROJECT_FOLDER / "output"
 LOG_FILE = PROJECT_FOLDER / "certificates.log"
 
-# The template is about 3500 px wide; the screen shows a smaller copy.
+# The template is about 3500 px wide. The live preview is drawn on a copy
+# this wide, which is about 12 times fewer pixels, so it updates quickly.
 PREVIEW_WIDTH = 1000
+# The sample names are shown cropped and bigger, so they need more detail.
+SAMPLE_SCALE = 0.5
+# Below this many template pixels, a mouse movement counts as a click, not a drag.
+DRAG_THRESHOLD = 15
+
+DEFAULT_FONT = "GreatVibes-Regular.ttf"
+
+MOVE_NAME = "Places or drags the name"
+PICK_COLOUR = "Picks the text colour (eyedropper)"
 
 SAMPLE_NAMES = {
     "Short name": "Amina Bello",
@@ -67,14 +78,18 @@ def read_template(file_name, file_bytes):
     return load_template(file_name, file_bytes)
 
 
-def available_fonts():
-    return sorted(path.name for path in FONTS_FOLDER.iterdir() if path.suffix.lower() in (".ttf", ".otf"))
+@st.cache_resource(max_entries=4)
+def scaled_template(_template, key, scale):
+    # The leading _ tells Streamlit not to hash the big image on every
+    # rerun; the template key already identifies it.
+    return _template.resize((round(_template.width * scale), round(_template.height * scale)))
 
 
 def default_settings(template):
+    fonts = available_fonts()
     return {
         "anchor": [template.width // 2, template.height // 2],
-        "font_file": available_fonts()[0],
+        "font_file": DEFAULT_FONT if DEFAULT_FONT in fonts else fonts[0],
         "font_size": template.height // 12,
         "color": "#1F3A5F",
         "max_width": int(template.width * 0.6),
@@ -128,14 +143,10 @@ def current_settings():
     }
 
 
-def screen_copy_with_guides(certificate, settings):
-    """Small copy for the screen, with a red cross on the anchor point and
-    lines at the edges of the maximum width. The guides exist only on screen;
-    they are never drawn on real certificates."""
-    scale = PREVIEW_WIDTH / certificate.width
-    screen_copy = certificate.resize((PREVIEW_WIDTH, round(certificate.height * scale)))
+def add_guides(screen_copy, settings, scale):
+    """Draw a red cross on the anchor point and lines at the edges of the
+    maximum width. Only on the screen copy; never on real certificates."""
     draw = ImageDraw.Draw(screen_copy)
-
     anchor_x = settings["anchor"][0] * scale
     anchor_y = settings["anchor"][1] * scale
     half_width = settings["max_width"] / 2 * scale
@@ -146,11 +157,11 @@ def screen_copy_with_guides(certificate, settings):
     return screen_copy
 
 
-def name_area(certificate, settings):
+def name_area(certificate, settings, scale):
     """Crop around the name so the sample previews are big enough to read."""
-    anchor_x, anchor_y = settings["anchor"]
-    half_width = settings["max_width"] * 0.6
-    half_height = settings["font_size"] * 1.2
+    anchor_x, anchor_y = settings["anchor"][0] * scale, settings["anchor"][1] * scale
+    half_width = settings["max_width"] * 0.6 * scale
+    half_height = settings["font_size"] * 1.2 * scale
     box = (
         max(0, anchor_x - half_width),
         max(0, anchor_y - half_height),
@@ -161,18 +172,18 @@ def name_area(certificate, settings):
 
 
 def template_section():
-    """Step 1: upload the template and place the name. Returns (template, settings)."""
+    """Step 1: upload the template and place the name. Returns the template."""
     st.header("1. Certificate template")
     uploaded = st.file_uploader("Upload the template (PNG, JPG or PDF)", key="template_file")
     if uploaded is None:
-        return None, None
+        return None
 
     file_bytes = uploaded.getvalue()
     try:
         template = read_template(uploaded.name, file_bytes)
     except ValueError as error:
         st.error(str(error))
-        return None, None
+        return None
 
     key = template_key(file_bytes)
     if st.session_state.get("template_key") != key:
@@ -181,45 +192,130 @@ def template_section():
     if st.session_state.saved_settings_found:
         st.info("The saved placement for this template was loaded.")
 
+    placement_editor(template, key, uploaded.name)
+    return template
+
+
+def apply_pending_changes():
+    # Streamlit does not allow changing a widget's value after the widget is
+    # drawn. A colour picked with the eyedropper or a newly added font is
+    # therefore stored as "pending" and applied here, before the widgets.
+    for widget_key in ("color", "font_file"):
+        pending_key = f"pending_{widget_key}"
+        if pending_key in st.session_state:
+            st.session_state[widget_key] = st.session_state.pop(pending_key)
+
+
+def select_new_font(file_name):
+    logger.info("Font added: %s", file_name)
+    st.session_state.pending_font_file = file_name
+    st.rerun(scope="fragment")
+
+
+def font_controls():
+    st.selectbox("Font", available_fonts(), key="font_file", format_func=font_display_name)
+    with st.expander("Add a font"):
+        google_name = st.text_input("Google Font name", placeholder="e.g. Playfair Display", help="Browse the free fonts at fonts.google.com")
+        if st.button("Download from Google Fonts"):
+            try:
+                with st.spinner("Downloading..."):
+                    file_name = download_google_font(google_name)
+                select_new_font(file_name)
+            except ValueError as error:
+                st.error(str(error))
+
+        uploaded_font = st.file_uploader("Or upload a font file (.ttf or .otf)", key="font_upload")
+        if uploaded_font and st.button("Add this font"):
+            try:
+                select_new_font(add_font_file(uploaded_font.name, uploaded_font.getvalue()))
+            except ValueError as error:
+                st.error(str(error))
+
+
+def centre_buttons(template):
+    horizontal, vertical, both = st.columns(3)
+    anchor_x, anchor_y = st.session_state.anchor
+    if horizontal.button("Centre horizontally", use_container_width=True):
+        st.session_state.anchor = [template.width // 2, anchor_y]
+    if vertical.button("Centre vertically", use_container_width=True):
+        st.session_state.anchor = [anchor_x, template.height // 2]
+    if both.button("Centre both", use_container_width=True):
+        st.session_state.anchor = [template.width // 2, template.height // 2]
+
+
+def handle_template_click(event, template, click_mode):
+    """Turn a click or drag on the screen preview into a new anchor or colour."""
+    # The event is in screen pixels; convert to template pixels.
+    to_template = template.width / event["width"]
+    start_x, start_y = event["x1"] * to_template, event["y1"] * to_template
+    # The mouse can be released outside the image, so keep the point inside it.
+    end_x = min(max(event["x2"] * to_template, 0), template.width - 1)
+    end_y = min(max(event["y2"] * to_template, 0), template.height - 1)
+
+    if click_mode == PICK_COLOUR:
+        red, green, blue = template.getpixel((int(end_x), int(end_y)))
+        st.session_state.pending_color = f"#{red:02X}{green:02X}{blue:02X}"
+        return
+
+    if abs(end_x - start_x) + abs(end_y - start_y) < DRAG_THRESHOLD:
+        st.session_state.anchor = [round(end_x), round(end_y)]
+        return
+    # A drag moves the name by the distance dragged, so it does not jump to
+    # wherever the mouse first grabbed it.
+    old_x, old_y = st.session_state.anchor
+    new_x = min(max(old_x + end_x - start_x, 0), template.width - 1)
+    new_y = min(max(old_y + end_y - start_y, 0), template.height - 1)
+    st.session_state.anchor = [round(new_x), round(new_y)]
+
+
+@st.fragment
+def placement_editor(template, key, template_name):
+    """Font, size, colour, position and live preview.
+
+    A fragment reruns on its own: changing the placement redraws only this
+    part, not the recipient list and everything below, so it stays fast.
+    """
+    apply_pending_changes()
     controls, preview = st.columns([1, 3])
     with controls:
-        st.selectbox("Font", available_fonts(), key="font_file")
+        font_controls()
         st.number_input("Font size", min_value=MIN_FONT_SIZE, max_value=2000, step=5, key="font_size")
         st.color_picker("Colour", key="color")
         st.slider("Maximum name width", min_value=100, max_value=template.width, step=10, key="max_width")
-        test_name = st.text_input("Try any name", value="Amina Bello")
+        test_name = st.text_input("Try any name", value="Amina Bello", key="test_name")
         if st.button("Save placement for this template"):
             save_settings(key, current_settings())
             st.session_state.saved_settings_found = True
-            logger.info("Saved placement for template %s (%s)", uploaded.name, key)
+            logger.info("Saved placement for template %s (%s)", template_name, key)
             st.success("Placement saved. It will be loaded next time you use this template.")
 
-    settings = current_settings()
     with preview:
-        st.caption("Click on the template where the centre of the name should be.")
-        certificate = draw_name(template, test_name or "Amina Bello", settings)
-        click = streamlit_image_coordinates(
-            screen_copy_with_guides(certificate, settings),
-            key="anchor_click",
+        click_mode = st.radio("Clicking on the template:", [MOVE_NAME, PICK_COLOUR], horizontal=True, key="click_mode")
+        centre_buttons(template)
+        settings = current_settings()
+
+        scale = PREVIEW_WIDTH / template.width
+        preview_image = draw_name(scaled_template(template, key, scale), test_name or "Amina Bello", settings, scale)
+        event = streamlit_image_coordinates(
+            add_guides(preview_image, settings, scale),
+            key="placement_click",
             width="stretch",
             image_format="JPEG",
             cursor="crosshair",
+            click_and_drag=True,
         )
-        # The component returns the last click on every rerun, so we only act
-        # on a click we have not handled yet.
-        if click and click["unix_time"] != st.session_state.get("last_click_time"):
-            st.session_state.last_click_time = click["unix_time"]
-            # The click is in screen pixels; convert to template pixels.
-            scale = template.width / click["width"]
-            st.session_state.anchor = [round(click["x"] * scale), round(click["y"] * scale)]
-            st.rerun()
+        # The component returns the last event on every rerun, so we only act
+        # on an event we have not handled yet.
+        if event and event["unix_time"] != st.session_state.get("last_event_time"):
+            st.session_state.last_event_time = event["unix_time"]
+            handle_template_click(event, template, click_mode)
+            st.rerun(scope="fragment")
 
+    sample_template = scaled_template(template, key, SAMPLE_SCALE)
     sample_columns = st.columns(len(SAMPLE_NAMES))
     for column, (label, sample_name) in zip(sample_columns, SAMPLE_NAMES.items()):
-        sample = draw_name(template, sample_name, settings)
-        column.image(name_area(sample, settings), caption=label)
-
-    return template, settings
+        sample = draw_name(sample_template, sample_name, settings, SAMPLE_SCALE)
+        column.image(name_area(sample, settings, SAMPLE_SCALE), caption=label)
 
 
 def choose_column(label, columns, detected_column):
@@ -273,9 +369,10 @@ def people_section():
     return people
 
 
-def generation_section(template, settings, people):
+def generation_section(template, people):
     """Step 3: preview one certificate, then generate all of them."""
     st.header("3. Preview and generate")
+    settings = current_settings()
     preview_column, generate_column = st.columns(2)
 
     if preview_column.button("Preview the first certificate"):
@@ -342,6 +439,8 @@ def email_section():
 
     # On by default: a real send cannot be undone, a dry run is harmless.
     dry_run = st.checkbox("Dry run: prepare every email but send nothing", value=True)
+    if dry_run:
+        st.warning("Dry run is ON: no email will be sent. Untick the box above to send for real.")
     recipients = generated if dry_run else skip_people_already_sent(generated)
     if not recipients:
         st.info("Everyone in this batch already received this certificate. Nothing to send.")
@@ -377,6 +476,8 @@ def report_section():
     dry_run = st.session_state.email_dry_run
     email_failed = st.session_state.email_failed
     st.header("5. Report" + (" (dry run)" if dry_run else ""))
+    if dry_run:
+        st.info("This was a dry run: no email was sent. Untick 'Dry run' in step 4 to send for real.")
 
     generated_count, sent_count, failed_count, skipped_count = st.columns(4)
     generated_count.metric("Generated", len(st.session_state.generated))
@@ -416,13 +517,13 @@ def main():
     st.set_page_config(page_title="Certificate Generator", layout="wide")
     st.title("Certificate Generator")
 
-    template, settings = template_section()
+    template = template_section()
     if template is None:
         return
     people = people_section()
     if not people:
         return
-    generation_section(template, settings, people)
+    generation_section(template, people)
     email_section()
     report_section()
 

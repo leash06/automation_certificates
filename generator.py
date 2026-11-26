@@ -21,7 +21,14 @@ MIN_FONT_SIZE = 20
 
 def fit_font(name, font_path, font_size, max_width):
     """Return the font at the chosen size, smaller only if the name is too wide."""
-    size = font_size
+    font = ImageFont.truetype(str(font_path), font_size)
+    width = font.getlength(name)
+    if width <= max_width:
+        return font
+
+    # Text width grows in proportion to font size, so this first guess is
+    # very close; the loop below only corrects rounding.
+    size = max(MIN_FONT_SIZE, int(font_size * max_width / width))
     font = ImageFont.truetype(str(font_path), size)
     while font.getlength(name) > max_width and size > MIN_FONT_SIZE:
         size -= 1
@@ -29,20 +36,28 @@ def fit_font(name, font_path, font_size, max_width):
     return font
 
 
-def draw_name(template, name, settings):
-    """Return a new image with the name centred on the anchor point."""
+def draw_name(template, name, settings, scale=1):
+    """Return a new image with the name centred on the anchor point.
+
+    scale is for the live on-screen preview: the template given is a smaller
+    copy (e.g. scale=0.28), which is much faster to draw. The font size is
+    still chosen at full size first, so the preview matches the final PDF.
+    """
     # convert() returns a copy, so the original template is never changed.
     # PDF has no transparency, so RGB is also what we need to save it later.
     certificate = template.convert("RGB")
 
     font_path = FONTS_FOLDER / settings["font_file"]
     font = fit_font(name, font_path, settings["font_size"], settings["max_width"])
+    if scale != 1:
+        font = ImageFont.truetype(str(font_path), max(1, round(font.size * scale)))
 
+    anchor_x, anchor_y = settings["anchor"]
     draw = ImageDraw.Draw(certificate)
     # anchor="mm" means the point we give is the middle of the text, both
     # horizontally and vertically, so every name is centred on that point.
     draw.text(
-        tuple(settings["anchor"]),
+        (anchor_x * scale, anchor_y * scale),
         name,
         font=font,
         fill=settings["color"],

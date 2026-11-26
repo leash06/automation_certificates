@@ -41,9 +41,13 @@ computer can open it.
 ## How to use it
 
 1. **Template:** upload a PNG, JPG or PDF. Click on the template where the
-   centre of the name should be. Choose the font, size, colour and maximum
-   width; the preview and the three samples (short, long, accented name)
-   update immediately. Click **Save placement** to reuse it next time.
+   centre of the name should be, or drag the name to move it. The
+   **Centre horizontally / vertically / both** buttons put it exactly in the
+   middle. Choose the font, size, colour and maximum width; the preview and
+   the three samples (short, long, accented name) update immediately.
+   To match a colour already on the template, switch clicking to
+   **eyedropper** and click that colour. Click **Save placement** to reuse it
+   next time.
 2. **Recipient list:** upload Excel (.xlsx), CSV, or the CSV of a Google
    Form's sheet. The name and email columns are found automatically; if not,
    choose them. An optional column can mark people as *winner*. Rows with an
@@ -52,7 +56,8 @@ computer can open it.
    The PDFs go to a new dated folder inside `output/`.
 4. **Send by email:** edit the subject and messages (`{name}` becomes each
    person's name). Start with a **dry run**: it prepares everything and sends
-   nothing. Untick it to really send. If some people already received this
+   nothing. **Untick "Dry run" to really send**; while it is ticked, no email
+   leaves your computer. If some people already received this
    certificate, you are warned first.
 5. **Report:** counts of generated, sent, failed and skipped. Download
    `failed.csv`, resend to failed emails in one click, or fix the file and
@@ -60,10 +65,18 @@ computer can open it.
 
 Everything that happens is written to `certificates.log`.
 
-## Adding a font
+## Fonts
 
-Put a `.ttf` or `.otf` file in `fonts/`. It appears in the font list the next
-time you open the app. Choose fonts that support accents (é, ç, ñ).
+About 25 free certificate fonts from Google Fonts come with the tool (script,
+serif and modern styles). To add another, open **Add a font** under the font
+list and either:
+
+- type the name of any font from <https://fonts.google.com> (for example
+  `Playfair Display`) and click **Download from Google Fonts**, or
+- upload a `.ttf` or `.otf` file.
+
+New fonts are saved in `fonts/`, so they keep working offline. Their licence
+files go in `fonts/licenses/`. Choose fonts that support accents (é, ç, ñ).
 
 ## For developers
 
@@ -80,6 +93,7 @@ python generator.py       # make 3 sample PDFs in output/ from the sample templa
 | `generator.py` | Draws the name centred on the anchor, shrinks long names, saves PDFs |
 | `mailer.py` | Gmail sending with delay, one retry, dry run and sending history |
 | `settings_store.py` | Saves placement and messages per template in `settings.json` |
+| `font_library.py` | Lists fonts, adds uploaded fonts, downloads Google Fonts |
 | `tests/` | Automated tests (Gmail is replaced by a fake, nothing is sent) |
 
 Not stored in Git: `.env`, `output/`, `settings.json`, logs, and any `.csv` or

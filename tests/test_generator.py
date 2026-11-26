@@ -42,6 +42,20 @@ def test_short_and_long_names_share_the_same_centre():
         assert right - left <= 800
 
 
+def test_small_preview_matches_full_size_certificate():
+    """The live preview draws on a smaller copy; the name must land in the
+    same relative place and shrink the same way as on the real certificate."""
+    long_name = "Maximilian Alexander Konstantin von Hohenberg-Schwarzenfeld"
+    full_size = draw_name(Image.new("RGB", (2000, 1000), "white"), long_name, SETTINGS)
+    preview = draw_name(Image.new("RGB", (500, 250), "white"), long_name, SETTINGS, scale=0.25)
+
+    full_box = ink_box(full_size)
+    preview_box = ink_box(preview)
+    for full_edge, preview_edge in zip(full_box, preview_box):
+        # A few pixels of tolerance: small text is rounded differently.
+        assert abs(full_edge * 0.25 - preview_edge) <= 4
+
+
 def test_template_is_not_changed():
     template = Image.new("RGB", (2000, 1000), "white")
     draw_name(template, "Amina", SETTINGS)
