@@ -17,15 +17,23 @@ EMAIL_HEADERS = {"email", "emailaddress", "mail", "adresseemail", "adressemail",
 def read_people_table(file_name, file_bytes):
     """Return the file as a table of text, or raise ValueError with a message for HR."""
     extension = Path(file_name).suffix.lower()
-    if extension == ".xlsx":
-        table = pd.read_excel(io.BytesIO(file_bytes), dtype=str)
-    elif extension == ".csv":
-        table = read_csv(file_bytes)
-    else:
+    if extension not in (".xlsx", ".csv"):
         raise ValueError(
             f"'{file_name}' is not a supported list. "
             "Please upload an Excel (.xlsx) or CSV file."
         )
+    try:
+        if extension == ".xlsx":
+            table = pd.read_excel(io.BytesIO(file_bytes), dtype=str)
+        else:
+            table = read_csv(file_bytes)
+    except Exception as error:
+        # Broad on purpose: an empty or damaged file fails in many different
+        # ways inside pandas, and HR needs the same clear message for all.
+        raise ValueError(
+            f"'{file_name}' could not be read. It may be empty or damaged. "
+            "Open it in Excel, check it, save it again and upload it."
+        ) from error
 
     # Spreadsheets often contain fully empty rows at the end; they are not
     # recipients, so we drop them instead of reporting them as errors.

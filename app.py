@@ -158,6 +158,13 @@ def name_layer(template, key, name, settings):
 
 # ------------------------------------------------------------- app state
 
+def show_unexpected_error():
+    # HR sees a short message; the full technical details go to the log.
+    # Streamlit's own "rerun" signal is not an Exception, so it never lands here.
+    logger.exception("Unexpected error in the app")
+    st.error(f"Something unexpected went wrong. The details were saved in {LOG_FILE.name}.")
+
+
 def keep_widget_values():
     # Writing a value back into its own key tells Streamlit to keep it even
     # while the widget's screen is hidden.
@@ -203,10 +210,12 @@ def start_placement(key, template):
     # Results made with a previous template must not be sent by mistake.
     clear_results()
     st.session_state.anchor = settings["anchor"]
-    st.session_state.font_file = settings["font_file"]
-    st.session_state.font_size = settings["font_size"]
-    st.session_state.color = settings["color"]
-    st.session_state.max_width = min(settings["max_width"], template.width)
+    # A template can be replaced from the editor, where these widgets are
+    # already drawn, so they go through "pending" (see apply_pending_changes).
+    st.session_state.pending_font_file = settings["font_file"]
+    st.session_state.pending_font_size = settings["font_size"]
+    st.session_state.pending_color = settings["color"]
+    st.session_state.pending_max_width = min(settings["max_width"], template.width)
     st.session_state.subject = settings["subject"]
     st.session_state.message_template = settings["message_template"]
     st.session_state.setdefault("test_name", DEFAULT_TEST_NAME)
@@ -233,9 +242,9 @@ def current_settings():
 def apply_pending_changes():
     # Streamlit does not allow changing a widget's value after the widget is
     # drawn. A colour picked with the eyedropper, a new font or a size set by
-    # dragging a corner is therefore stored as "pending" and applied here,
-    # before the widgets are drawn.
-    for widget_key in ("color", "font_file", "font_size"):
+    # dragging a corner, or a new template's settings, is therefore stored as
+    # "pending" and applied here, before the widgets are drawn.
+    for widget_key in ("color", "font_file", "font_size", "max_width"):
         pending_key = f"pending_{widget_key}"
         if pending_key in st.session_state:
             st.session_state[widget_key] = st.session_state.pop(pending_key)
@@ -437,6 +446,15 @@ def design_editor(template, key):
     A fragment reruns on its own: changing the placement redraws only this
     screen, not the whole app, so it stays fast.
     """
+    # When a fragment reruns on its own, the try/except at the bottom of
+    # this file does not run, so the fragment catches its own errors.
+    try:
+        design_editor_content(template, key)
+    except Exception:
+        show_unexpected_error()
+
+
+def design_editor_content(template, key):
     apply_pending_changes()
     actions = top_bar("Design")
     with actions:
@@ -562,6 +580,14 @@ def reset_preview_page():
 def preview_list(template, people):
     """Every certificate as a list, page by page, like the design's
     certificate list. A fragment, so turning pages redraws only the list."""
+    # Same reason as in design_editor: a fragment catches its own errors.
+    try:
+        preview_list_content(template, people)
+    except Exception:
+        show_unexpected_error()
+
+
+def preview_list_content(template, people):
     search_box, _ = st.columns([2, 3])
     search = search_box.text_input(
         "Search",
@@ -811,6 +837,4 @@ def main():
 try:
     main()
 except Exception:
-    # HR sees a short message; the full technical details go to the log.
-    logger.exception("Unexpected error in the app")
-    st.error(f"Something unexpected went wrong. The details were saved in {LOG_FILE.name}.")
+    show_unexpected_error()

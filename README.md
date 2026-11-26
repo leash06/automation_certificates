@@ -37,10 +37,15 @@ pip install -r requirements.txt
 
 ## Run
 
+Double-click `run.bat`, or in a terminal in this folder:
+
 ```powershell
-.\.venv\Scripts\Activate.ps1
-streamlit run app.py
+.\run.bat
 ```
+
+`run.bat` always uses the Python in `.venv`. Typing `streamlit run app.py`
+without activating `.venv` first may start another Python that does not have
+the project's libraries (for example `No module named 'dotenv'`).
 
 The app opens in your browser at <http://localhost:8501>. Only your own
 computer can open it.

@@ -1,7 +1,7 @@
 import io
 import zipfile
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from generator import FONTS_FOLDER, draw_name, fit_font, generate_certificates, safe_file_name, zip_certificates
 
