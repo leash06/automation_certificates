@@ -1,0 +1,13 @@
+﻿# Local environment and secrets
+.venv/
+.env
+
+# Generated / personal data
+output/
+*.csv
+*.xlsx
+
+# Python cache/test
+__pycache__/
+*.pyc
+.pytest_cache/
