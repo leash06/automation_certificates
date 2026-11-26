@@ -2,14 +2,13 @@
 
 import csv
 import logging
-import os
 import smtplib
 import time
 from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +26,23 @@ WAIT_BEFORE_RETRY_SECONDS = 5
 
 def load_gmail_credentials(env_file=ENV_FILE):
     """Return (address, app password) from .env, or raise ValueError for HR."""
-    load_dotenv(env_file)
-    address = os.getenv("GMAIL_ADDRESS")
-    password = os.getenv("GMAIL_APP_PASSWORD")
+    env_file = Path(env_file)
+    if not env_file.exists():
+        hint = " A file named .env.txt was found: rename it to exactly .env" if env_file.with_name(".env.txt").exists() else ""
+        raise ValueError(
+            f"The Gmail settings file was not found. It must be named exactly .env "
+            f"(not .env.txt) and be in {env_file.parent}.{hint}"
+        )
+    # The file is read fresh each time, so a fix to .env works without
+    # restarting the app. utf-8-sig ignores the invisible marker that
+    # Notepad sometimes adds at the start of a file.
+    settings = dotenv_values(env_file, encoding="utf-8-sig")
+    address = (settings.get("GMAIL_ADDRESS") or "").strip()
+    password = (settings.get("GMAIL_APP_PASSWORD") or "").strip()
     if not address or not password:
         raise ValueError(
-            "Gmail is not set up yet. Add GMAIL_ADDRESS and GMAIL_APP_PASSWORD "
-            "to the .env file (see .env.example)."
+            "The .env file was found, but GMAIL_ADDRESS or GMAIL_APP_PASSWORD is "
+            "missing or empty. Write them exactly as in .env.example."
         )
     # Google shows App Passwords as 4 groups of 4 letters; the spaces are not part of it.
     return address, password.replace(" ", "")

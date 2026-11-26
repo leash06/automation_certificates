@@ -32,8 +32,7 @@ LOG_FILE = PROJECT_FOLDER / "certificates.log"
 PREVIEW_WIDTH = 1000
 # The sample names are shown cropped and bigger, so they need more detail.
 SAMPLE_SCALE = 0.5
-# Below this many template pixels, a mouse movement counts as a click, not a drag.
-DRAG_THRESHOLD = 15
+MAX_FONT_SIZE = 2000
 
 DEFAULT_FONT = "GreatVibes-Regular.ttf"
 
@@ -94,7 +93,11 @@ def background_url(_template, key):
 
 def name_layer(template, key, name, settings):
     """A transparent picture, the size of the screen preview, holding only
-    the name and the guides. The browser slides it when HR drags the name."""
+    the name and the guides. The browser slides it when HR drags the name.
+
+    Returns (layer, name_box): name_box is [left, top, right, bottom] around
+    the letters, as fractions of the picture, for the selection box.
+    """
     scale = PREVIEW_WIDTH / template.width
     size = scaled_template(template, key, scale).size
     # Transparent pixels in the text colour (alpha 0), not transparent black:
@@ -102,8 +105,19 @@ def name_layer(template, key, name, settings):
     # light text a dark outline.
     layer = Image.new("RGBA", size, ImageColor.getrgb(settings["color"])[:3] + (0,))
     write_name(layer, name, settings, scale)
+
+    # Measured before the guides are added, so the box fits the letters only.
+    letters = layer.getchannel("A").getbbox()
+    name_box = None
+    if letters:
+        padding = 6  # screen pixels around the letters, like Canva's box
+        left, top, right, bottom = letters
+        name_box = [
+            (left - padding) / size[0], (top - padding) / size[1],
+            (right + padding) / size[0], (bottom + padding) / size[1],
+        ]
     add_guides(layer, settings, scale)
-    return layer
+    return layer, name_box
 
 
 def default_settings(template):
@@ -221,7 +235,7 @@ def apply_pending_changes():
     # Streamlit does not allow changing a widget's value after the widget is
     # drawn. A colour picked with the eyedropper or a newly added font is
     # therefore stored as "pending" and applied here, before the widgets.
-    for widget_key in ("color", "font_file"):
+    for widget_key in ("color", "font_file", "font_size"):
         pending_key = f"pending_{widget_key}"
         if pending_key in st.session_state:
             st.session_state[widget_key] = st.session_state.pop(pending_key)
@@ -264,28 +278,23 @@ def centre_buttons(template):
         st.session_state.anchor = [template.width // 2, template.height // 2]
 
 
-def handle_template_click(event, template, click_mode):
-    """Turn a click or drag on the screen preview into a new anchor or colour."""
-    # The event is in fractions of the picture (0 to 1); convert to template pixels.
-    start_x, start_y = event["x1"] * template.width, event["y1"] * template.height
-    # The mouse can be released outside the image, so keep the point inside it.
-    end_x = min(max(event["x2"] * template.width, 0), template.width - 1)
-    end_y = min(max(event["y2"] * template.height, 0), template.height - 1)
+def handle_canvas_gesture(gesture, template):
+    """Apply what HR did on the preview (see placement_canvas.py for the messages)."""
+    if gesture["action"] == "resize":
+        new_size = round(st.session_state.font_size * gesture["factor"])
+        st.session_state.pending_font_size = min(max(new_size, MIN_FONT_SIZE), MAX_FONT_SIZE)
+        return
 
-    if click_mode == PICK_COLOUR:
-        red, green, blue = template.getpixel((int(end_x), int(end_y)))
+    # Positions are fractions of the picture (0 to 1); convert to template
+    # pixels, keeping the point inside the template if the mouse left it.
+    x = round(min(max(gesture["x"], 0), 1) * (template.width - 1))
+    y = round(min(max(gesture["y"], 0), 1) * (template.height - 1))
+    if gesture["action"] == "pick":
+        red, green, blue = template.getpixel((x, y))
         st.session_state.pending_color = f"#{red:02X}{green:02X}{blue:02X}"
-        return
-
-    if abs(end_x - start_x) + abs(end_y - start_y) < DRAG_THRESHOLD:
-        st.session_state.anchor = [round(end_x), round(end_y)]
-        return
-    # A drag moves the name by the distance dragged, so it does not jump to
-    # wherever the mouse first grabbed it.
-    old_x, old_y = st.session_state.anchor
-    new_x = min(max(old_x + end_x - start_x, 0), template.width - 1)
-    new_y = min(max(old_y + end_y - start_y, 0), template.height - 1)
-    st.session_state.anchor = [round(new_x), round(new_y)]
+    else:
+        # "move" (dragged, maybe snapped to the centre) or "click" (placed).
+        st.session_state.anchor = [x, y]
 
 
 @st.fragment
@@ -299,7 +308,7 @@ def placement_editor(template, key, template_name):
     controls, preview = st.columns([1, 3])
     with controls:
         font_controls()
-        st.number_input("Font size", min_value=MIN_FONT_SIZE, max_value=2000, step=5, key="font_size")
+        st.number_input("Font size", min_value=MIN_FONT_SIZE, max_value=MAX_FONT_SIZE, step=5, key="font_size")
         st.color_picker("Colour", key="color")
         st.slider("Maximum name width", min_value=100, max_value=template.width, step=10, key="max_width")
         test_name = st.text_input("Try any name", value="Amina Bello", key="test_name")
@@ -314,14 +323,18 @@ def placement_editor(template, key, template_name):
         centre_buttons(template)
         settings = current_settings()
 
-        event = placement_canvas(
+        st.caption("Drag the name to move it, drag a corner to resize it. Pink lines show the page centre.")
+        layer, name_box = name_layer(template, key, test_name or "Amina Bello", settings)
+        gesture = placement_canvas(
             background_url(template, key),
-            name_layer(template, key, test_name or "Amina Bello", settings),
+            layer,
+            anchor=[settings["anchor"][0] / template.width, settings["anchor"][1] / template.height],
+            name_box=name_box,
             mode="colour" if click_mode == PICK_COLOUR else "move",
             key="placement_canvas",
         )
-        if event:
-            handle_template_click(event, template, click_mode)
+        if gesture:
+            handle_canvas_gesture(gesture, template)
             st.rerun(scope="fragment")
 
     sample_template = scaled_template(template, key, SAMPLE_SCALE)

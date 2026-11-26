@@ -23,8 +23,15 @@ pip install -r requirements.txt
 
 1. Open <https://myaccount.google.com/apppasswords> and create an App Password
    named "Certificates". Google shows 16 letters.
-2. Copy `.env.example` to a new file named `.env`.
-3. In `.env`, write your Gmail address and the App Password.
+2. In the project folder, run this to create `.env` and open it:
+   ```powershell
+   Copy-Item .env.example .env
+   notepad .env
+   ```
+   (Creating it by hand in Notepad often saves it as `.env.txt`, which the
+   app cannot find.)
+3. In `.env`, replace the example values with your Gmail address and the
+   App Password, then save.
 
 `.env` is never sent to GitHub. Never put the password anywhere else.
 
@@ -41,9 +48,11 @@ computer can open it.
 ## How to use it
 
 1. **Template:** upload a PNG, JPG or PDF. Click on the template where the
-   centre of the name should be, or drag the name to move it. The
-   **Centre horizontally / vertically / both** buttons put it exactly in the
-   middle. Choose the font, size, colour and maximum width; the preview and
+   centre of the name should be, or drag the name to move it, like in Canva.
+   Drag a corner handle of the purple box to make the name bigger or
+   smaller. Pink lines appear, and the name snaps, when it reaches the
+   centre of the page. The **Centre horizontally / vertically / both**
+   buttons also put it exactly in the middle. Choose the font, size, colour and maximum width; the preview and
    the three samples (short, long, accented name) update immediately.
    To match a colour already on the template, switch clicking to
    **eyedropper** and click that colour. Click **Save placement** to reuse it

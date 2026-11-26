@@ -47,8 +47,11 @@ def fake_gmail(monkeypatch, tmp_path):
     FakeGmail.wrong_password = False
     monkeypatch.setattr(mailer.smtplib, "SMTP_SSL", FakeGmail)
     monkeypatch.setattr(mailer.time, "sleep", lambda seconds: None)  # keep tests fast
-    monkeypatch.setenv("GMAIL_ADDRESS", "hr@example.com")
-    monkeypatch.setenv("GMAIL_APP_PASSWORD", "abcd efgh ijkl mnop")
+    # A test .env in the test's own temporary folder, never the real one.
+    # The BOM (﻿) is what Notepad sometimes adds; it must not matter.
+    (tmp_path / ".env").write_text(
+        "﻿GMAIL_ADDRESS=hr@example.com\nGMAIL_APP_PASSWORD=abcd efgh ijkl mnop\n", encoding="utf-8"
+    )
 
 
 def make_people(tmp_path, count=2):
@@ -116,9 +119,21 @@ def test_wrong_password_gives_one_clear_message(tmp_path):
         send(make_people(tmp_path), tmp_path)
 
 
-def test_missing_gmail_setup_gives_clear_message(monkeypatch, tmp_path):
-    monkeypatch.delenv("GMAIL_ADDRESS")
-    with pytest.raises(ValueError, match="not set up"):
+def test_empty_password_gives_clear_message(tmp_path):
+    (tmp_path / ".env").write_text("GMAIL_ADDRESS=hr@example.com\nGMAIL_APP_PASSWORD=\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="missing or empty"):
+        mailer.load_gmail_credentials(tmp_path / ".env")
+
+
+def test_missing_env_file_gives_clear_message(tmp_path):
+    (tmp_path / ".env").unlink()
+    with pytest.raises(ValueError, match="not found"):
+        mailer.load_gmail_credentials(tmp_path / ".env")
+
+
+def test_env_saved_as_txt_by_notepad_is_pointed_out(tmp_path):
+    (tmp_path / ".env").rename(tmp_path / ".env.txt")
+    with pytest.raises(ValueError, match="rename it to exactly .env"):
         mailer.load_gmail_credentials(tmp_path / ".env")
 
 
