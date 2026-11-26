@@ -4,9 +4,11 @@ The placement preview in app.py and the final certificates both call
 draw_name(), so what HR sees on screen is exactly what recipients receive.
 """
 
+import io
 import logging
 import re
 import unicodedata
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -125,6 +127,18 @@ def generate_certificates(template, people, settings, output_folder):
 
     logger.info("Generated %d certificates in %s (%d failed)", len(generated), output_folder, len(failed))
     return generated, failed
+
+
+def zip_certificates(generated_people):
+    """Put every generated PDF into one ZIP file, returned as bytes for download."""
+    buffer = io.BytesIO()
+    # PDFs are already compressed, so ZIP_STORED (no extra compression) is
+    # just as small and much faster.
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        for person in generated_people:
+            pdf_path = Path(person["pdf_path"])
+            archive.write(pdf_path, arcname=pdf_path.name)
+    return buffer.getvalue()
 
 
 if __name__ == "__main__":

@@ -144,17 +144,10 @@ def find_already_sent(people, template_key, history_file=HISTORY_FILE):
     return [person for person in people if person["email"].lower() in emails_sent_before]
 
 
-def send_certificates(generated_people, messages, template_key, dry_run=False, env_file=ENV_FILE, history_file=HISTORY_FILE):
-    """Email each person their PDF. Returns (sent, failed).
-
-    In a dry run every email is prepared (so missing PDFs are still caught)
-    but nothing is sent and Gmail is not contacted.
-    """
-    if dry_run:
-        sender, password = "dry-run", None
-    else:
-        sender, password = load_gmail_credentials(env_file)
-        check_gmail_login(sender, password)
+def send_certificates(generated_people, messages, template_key, env_file=ENV_FILE, history_file=HISTORY_FILE):
+    """Email each person their PDF. Returns (sent, failed)."""
+    sender, password = load_gmail_credentials(env_file)
+    check_gmail_login(sender, password)
 
     sent = []
     failed = []
@@ -163,11 +156,6 @@ def send_certificates(generated_people, messages, template_key, dry_run=False, e
             email = build_email(sender, person, messages)
         except OSError as error:
             failed.append({**person, "reason": f"Certificate file missing: {error}"})
-            continue
-
-        if dry_run:
-            logger.info("Dry run: email prepared for %s", person["email"])
-            sent.append(person)
             continue
 
         if number > 0:
@@ -182,6 +170,5 @@ def send_certificates(generated_people, messages, template_key, dry_run=False, e
         record_sent(person, template_key, history_file)
         sent.append(person)
 
-    outcome = "prepared (dry run, nothing sent)" if dry_run else "sent"
-    logger.info("Batch finished: %d %s, %d failed", len(sent), outcome, len(failed))
+    logger.info("Batch finished: %d sent, %d failed", len(sent), len(failed))
     return sent, failed

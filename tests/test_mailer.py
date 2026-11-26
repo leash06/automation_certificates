@@ -60,15 +60,14 @@ def make_people(tmp_path, count=2):
     for number in range(count):
         pdf_path = tmp_path / f"person_{number}.pdf"
         pdf_path.write_bytes(b"%PDF-1.4 fake certificate")
-        status = "winner" if number == 0 else "participant"
-        people.append({"name": f"Person {number}", "email": f"p{number}@example.com", "status": status, "pdf_path": str(pdf_path)})
+        people.append({"name": f"Person {number}", "email": f"p{number}@example.com", "pdf_path": str(pdf_path)})
     return people
 
 
-def send(people, tmp_path, dry_run=False):
+def send(people, tmp_path):
     # tmp_path keeps the test's .env and history away from the real ones.
     return mailer.send_certificates(
-        people, MESSAGES, "template-a", dry_run=dry_run,
+        people, MESSAGES, "template-a",
         env_file=tmp_path / ".env", history_file=tmp_path / "history.csv",
     )
 
@@ -84,12 +83,6 @@ def test_each_person_gets_personal_message_and_own_pdf(tmp_path):
     assert "Congratulations Person 1!" in second_email.get_body().get_content()
     attachment = next(second_email.iter_attachments())
     assert attachment.get_filename() == "person_1.pdf"
-
-
-def test_dry_run_sends_nothing(tmp_path):
-    sent, failed = send(make_people(tmp_path), tmp_path, dry_run=True)
-    assert len(sent) == 2
-    assert FakeGmail.sent_emails == []
 
 
 def test_failed_email_is_retried_once(tmp_path):
@@ -158,9 +151,8 @@ def test_sent_people_are_remembered_per_template(tmp_path):
     assert mailer.find_already_sent(people, "template-b", history_file) == []
 
 
-def test_dry_run_and_failed_emails_are_not_remembered(tmp_path):
-    FakeGmail.failures_left = 2
-    send(make_people(tmp_path), tmp_path, dry_run=True)
+def test_failed_emails_are_not_remembered(tmp_path):
+    FakeGmail.failures_left = 2  # the first try and the retry both fail
     send(make_people(tmp_path, count=1), tmp_path)
     assert mailer.find_already_sent(make_people(tmp_path), "template-a", tmp_path / "history.csv") == []
 

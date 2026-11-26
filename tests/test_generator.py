@@ -1,6 +1,9 @@
+import io
+import zipfile
+
 from PIL import Image, ImageDraw
 
-from generator import FONTS_FOLDER, draw_name, fit_font, generate_certificates, safe_file_name
+from generator import FONTS_FOLDER, draw_name, fit_font, generate_certificates, safe_file_name, zip_certificates
 
 FONT_PATH = FONTS_FOLDER / "Montserrat-Regular.ttf"
 
@@ -78,9 +81,9 @@ def test_safe_file_name():
 def test_one_pdf_per_person_and_same_names_do_not_overwrite(tmp_path):
     template = Image.new("RGB", (2000, 1000), "white")
     people = [
-        {"name": "Amina Bello", "email": "amina@example.com", "status": "winner"},
-        {"name": "Amina Bello", "email": "amina.b@example.com", "status": "participant"},
-        {"name": "Hélène Muñoz", "email": "helene@example.com", "status": "participant"},
+        {"name": "Amina Bello", "email": "amina@example.com"},
+        {"name": "Amina Bello", "email": "amina.b@example.com"},
+        {"name": "Hélène Muñoz", "email": "helene@example.com"},
     ]
     generated, failed = generate_certificates(template, people, SETTINGS, tmp_path)
     assert failed == []
@@ -90,11 +93,20 @@ def test_one_pdf_per_person_and_same_names_do_not_overwrite(tmp_path):
 def test_one_failure_does_not_stop_the_batch(tmp_path):
     template = Image.new("RGB", (2000, 1000), "white")
     people = [
-        {"name": "Amina Bello", "email": "amina@example.com", "status": "winner"},
-        {"name": "Kofi Mensah", "email": "kofi@example.com", "status": "participant"},
+        {"name": "Amina Bello", "email": "amina@example.com"},
+        {"name": "Kofi Mensah", "email": "kofi@example.com"},
     ]
     broken_settings = {**SETTINGS, "color": "not-a-colour"}
     generated, failed = generate_certificates(template, people, broken_settings, tmp_path)
     assert generated == []
     assert len(failed) == 2
     assert "could not be created" in failed[0]["reason"]
+
+
+def test_zip_contains_every_certificate(tmp_path):
+    template = Image.new("RGB", (2000, 1000), "white")
+    people = [{"name": "Amina Bello", "email": "amina@example.com"}, {"name": "Hélène Muñoz", "email": "helene@example.com"}]
+    generated, failed = generate_certificates(template, people, SETTINGS, tmp_path)
+
+    archive = zipfile.ZipFile(io.BytesIO(zip_certificates(generated)))
+    assert sorted(archive.namelist()) == ["Amina_Bello.pdf", "Helene_Munoz.pdf"]

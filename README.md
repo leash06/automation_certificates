@@ -47,29 +47,31 @@ computer can open it.
 
 ## How to use it
 
-1. **Template:** upload a PNG, JPG or PDF. Click on the template where the
-   centre of the name should be, or drag the name to move it, like in Canva.
-   Drag a corner handle of the purple box to make the name bigger or
-   smaller. Pink lines appear, and the name snaps, when it reaches the
-   centre of the page. The **Centre horizontally / vertically / both**
-   buttons also put it exactly in the middle. Choose the font, size, colour and maximum width; the preview
-   updates immediately. Type your longest name, and one with accents, in
-   **Try any name** to check they fit.
-   To match a colour already on the template, switch clicking to
-   **eyedropper** and click that colour. Click **Save placement** to reuse it
-   next time.
-2. **Recipient list:** upload Excel (.xlsx), CSV, or the CSV of a Google
-   Form's sheet. The name and email columns are found automatically; if not,
-   choose them. An optional column can mark people as *winner*. Rows with an
-   empty name, a bad email or a duplicate are listed and skipped.
-3. **Preview and generate:** check the first certificate, then generate all.
-   The PDFs go to a new dated folder inside `output/`.
-4. **Send by email:** edit the subject and the message template (`{name}` becomes each
-   person's name). Start with a **dry run**: it prepares everything and sends
-   nothing. **Untick "Dry run" to really send**; while it is ticked, no email
-   leaves your computer. If some people already received this
-   certificate, you are warned first.
-5. **Report:** counts of generated, sent, failed and skipped. Download
+1. **Template and name placement:** upload a PNG, JPG or PDF. Drag the
+   name to move it, like in Canva, or click where its centre should be.
+   Drag a corner handle of the purple box to make it bigger or smaller.
+   Pink lines appear, and the name snaps, when it reaches the centre of the
+   page; the **Centre** buttons also put it exactly in the middle. Choose
+   the font, size, colour and maximum width on the left. Switch the mouse
+   to **Pick colour** and click the template to copy a colour from it.
+   Type your longest name, and one with accents, in **Try a name** to check
+   they fit. Click **Save placement** to reuse it next time.
+2. **Recipients:** upload Excel (.xlsx), CSV, or the CSV of a Google Form's
+   sheet. The name and email columns are found automatically; if not,
+   choose them. Rows with an empty name, a bad email or a duplicate are
+   listed and skipped.
+3. **Preview all certificates:** every certificate, page by page, with a
+   search box. Click **View full size** to see one exactly as it will be.
+4. **Send or download:**
+   - **Send by email:** edit the subject and the message template (`{name}`
+     becomes each person's name), then click **Send**. Each person gets
+     their own PDF. If some people already received this certificate, you
+     are warned first.
+   - **Download:** click **Create certificates**, then **Download** to get
+     every PDF in one ZIP file, without sending any email.
+
+   Each time, the PDFs are also kept in a new dated folder inside `output/`.
+5. **Report** (after sending): counts of sent, failed and skipped. Download
    `failed.csv`, resend to failed emails in one click, or fix the file and
    upload it again as the recipient list.
 

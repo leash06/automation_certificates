@@ -12,8 +12,6 @@ from email_validator import EmailNotValidError, validate_email
 # and "FULL-NAME" all become "fullname".
 NAME_HEADERS = {"name", "fullname", "nom", "nomcomplet", "nometprénom", "prénometnom"}
 EMAIL_HEADERS = {"email", "emailaddress", "mail", "adresseemail", "adressemail", "courriel"}
-STATUS_HEADERS = {"status", "statut", "type", "category", "catégorie"}
-WINNER_VALUES = {"winner", "gagnant", "gagnante"}
 
 
 def read_people_table(file_name, file_bytes):
@@ -69,15 +67,7 @@ def check_email(email):
         return None
 
 
-def read_status(row, status_column):
-    if status_column is None:
-        return "participant"
-    if row[status_column].strip().lower() in WINNER_VALUES:
-        return "winner"
-    return "participant"
-
-
-def clean_people(table, name_column, email_column, status_column=None):
+def clean_people(table, name_column, email_column):
     """Split the table into valid recipients and rejected rows with a reason.
 
     One bad row never stops the others: it is recorded and skipped.
@@ -110,6 +100,6 @@ def clean_people(table, name_column, email_column, status_column=None):
             continue
 
         first_row_by_email[email.lower()] = row_number
-        valid_people.append({"name": name, "email": email, "status": read_status(row, status_column)})
+        valid_people.append({"name": name, "email": email})
 
     return valid_people, rejected_rows

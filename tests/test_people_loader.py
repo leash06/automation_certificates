@@ -6,19 +6,19 @@ import pytest
 from people_loader import (
     EMAIL_HEADERS,
     NAME_HEADERS,
-    STATUS_HEADERS,
     clean_people,
     find_column,
     read_people_table,
 )
 
-SAMPLE_CSV = """Full name,E-mail,Status
-Amina Bello,amina.bello@example.com,winner
-Hélène  Muñoz ,helene.munoz@example.com,participant
-,no.name@example.com,participant
-François Diop,francois.diop@not-an-email,participant
-Amina Bello,AMINA.BELLO@example.com,winner
-Kofi Mensah,,participant
+# Extra columns (like Team) are simply ignored: only name and email are used.
+SAMPLE_CSV = """Full name,E-mail,Team
+Amina Bello,amina.bello@example.com,Sales
+Hélène  Muñoz ,helene.munoz@example.com,HR
+,no.name@example.com,HR
+François Diop,francois.diop@not-an-email,IT
+Amina Bello,AMINA.BELLO@example.com,Sales
+Kofi Mensah,,IT
 """
 
 
@@ -26,15 +26,14 @@ def load_and_clean(file_name, file_bytes):
     table = read_people_table(file_name, file_bytes)
     name_column = find_column(table.columns, NAME_HEADERS)
     email_column = find_column(table.columns, EMAIL_HEADERS)
-    status_column = find_column(table.columns, STATUS_HEADERS)
-    return clean_people(table, name_column, email_column, status_column)
+    return clean_people(table, name_column, email_column)
 
 
 def test_valid_rows_are_kept_and_names_tidied():
     valid, rejected = load_and_clean("list.csv", SAMPLE_CSV.encode("utf-8"))
     assert valid == [
-        {"name": "Amina Bello", "email": "amina.bello@example.com", "status": "winner"},
-        {"name": "Hélène Muñoz", "email": "helene.munoz@example.com", "status": "participant"},
+        {"name": "Amina Bello", "email": "amina.bello@example.com"},
+        {"name": "Hélène Muñoz", "email": "helene.munoz@example.com"},
     ]
 
 
@@ -52,7 +51,7 @@ def test_bad_rows_are_skipped_with_reason_and_row_number():
 def test_google_form_export_headers_are_detected():
     csv = "Timestamp,Email Address,Name\n2026/11/20,kofi@example.com,Kofi Mensah\n"
     valid, rejected = load_and_clean("form.csv", csv.encode("utf-8"))
-    assert valid == [{"name": "Kofi Mensah", "email": "kofi@example.com", "status": "participant"}]
+    assert valid == [{"name": "Kofi Mensah", "email": "kofi@example.com"}]
 
 
 def test_french_excel_csv_with_semicolons_and_windows_encoding():
