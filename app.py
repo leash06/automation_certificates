@@ -17,7 +17,7 @@ from PIL import ImageDraw
 from streamlit_image_coordinates import streamlit_image_coordinates
 
 from generator import FONTS_FOLDER, MIN_FONT_SIZE, draw_name, generate_certificates
-from mailer import send_certificates
+from mailer import find_already_sent, send_certificates
 from people_loader import EMAIL_HEADERS, NAME_HEADERS, STATUS_HEADERS, clean_people, find_column, read_people_table
 from settings_store import load_settings, save_settings, template_key
 from template_loader import load_template
@@ -81,6 +81,11 @@ def default_settings(template):
     }
 
 
+def clear_email_results():
+    for name in ("email_sent", "email_failed", "email_dry_run"):
+        st.session_state.pop(name, None)
+
+
 def start_placement(key, template):
     """Fill the controls with this template's saved settings, or defaults."""
     saved = load_settings(key)
@@ -94,6 +99,7 @@ def start_placement(key, template):
     st.session_state.saved_settings_found = saved is not None
     # Certificates made with a previous template must not be emailed by mistake.
     st.session_state.pop("generated", None)
+    clear_email_results()
     st.session_state.anchor = settings["anchor"]
     st.session_state.font_file = settings["font_file"]
     st.session_state.font_size = settings["font_size"]
@@ -170,6 +176,7 @@ def template_section():
 
     key = template_key(file_bytes)
     if st.session_state.get("template_key") != key:
+        logger.info("Template uploaded: %s (%s)", uploaded.name, key)
         start_placement(key, template)
     if st.session_state.saved_settings_found:
         st.info("The saved placement for this template was loaded.")
@@ -251,6 +258,11 @@ def people_section():
 
     people, rejected = clean_people(table, name_column, email_column, None if status_column == NO_COLUMN else status_column)
     st.session_state.rejected_rows = rejected
+    # Streamlit reruns this on every click; log each list only once.
+    list_summary = (uploaded.name, name_column, email_column, len(people), len(rejected))
+    if st.session_state.get("logged_list") != list_summary:
+        st.session_state.logged_list = list_summary
+        logger.info("Recipient list %s: %d valid, %d skipped", uploaded.name, len(people), len(rejected))
 
     valid_count, skipped_count = st.columns(2)
     valid_count.metric("Valid recipients", len(people))
@@ -277,11 +289,38 @@ def generation_section(template, settings, people):
             generated, failed = generate_certificates(template, people, settings, batch_folder)
         st.session_state.generated = generated
         st.session_state.generation_failed = failed
+        # A new batch starts a new report.
+        clear_email_results()
 
         st.success(f"{len(generated)} certificates saved in {batch_folder}")
         if failed:
             st.error(f"{len(failed)} certificates could not be created.")
             st.dataframe(pd.DataFrame(failed), hide_index=True)
+
+
+def send_emails(recipients, dry_run):
+    """Return (sent, failed), or None if sending could not start (message shown)."""
+    try:
+        with st.spinner("Preparing emails..." if dry_run else "Sending emails... this takes a few seconds per person."):
+            return send_certificates(recipients, current_messages(), st.session_state.template_key, dry_run)
+    except ValueError as error:
+        st.error(str(error))
+        return None
+
+
+def skip_people_already_sent(generated):
+    """Warn before sending the same certificate twice; return who to send to."""
+    already_sent = find_already_sent(generated, st.session_state.template_key)
+    if not already_sent:
+        return generated
+
+    st.warning(f"{len(already_sent)} of these people already received this certificate by email.")
+    with st.expander("Show who"):
+        st.dataframe(pd.DataFrame(already_sent)[["name", "email"]], hide_index=True)
+    choice = st.radio("What should happen to them?", ["Skip them (recommended)", "Send it to them again"])
+    if choice == "Send it to them again":
+        return generated
+    return [person for person in generated if person not in already_sent]
 
 
 def email_section():
@@ -298,28 +337,79 @@ def email_section():
     st.caption("{name} is replaced by each person's name.")
     if st.button("Save messages for this template"):
         save_settings(st.session_state.template_key, current_messages())
+        logger.info("Saved email messages for template %s", st.session_state.template_key)
         st.success("Messages saved for this template.")
 
     # On by default: a real send cannot be undone, a dry run is harmless.
     dry_run = st.checkbox("Dry run: prepare every email but send nothing", value=True)
-    button_label = f"Dry run for {len(generated)} emails" if dry_run else f"Send {len(generated)} emails"
-    if not st.button(button_label, type="primary"):
+    recipients = generated if dry_run else skip_people_already_sent(generated)
+    if not recipients:
+        st.info("Everyone in this batch already received this certificate. Nothing to send.")
         return
 
-    try:
-        with st.spinner("Preparing emails..." if dry_run else "Sending emails... this takes a few seconds per person."):
-            sent, failed = send_certificates(generated, current_messages(), dry_run)
-    except ValueError as error:
-        st.error(str(error))
+    button_label = f"Dry run for {len(recipients)} emails" if dry_run else f"Send {len(recipients)} emails"
+    if st.button(button_label, type="primary"):
+        result = send_emails(recipients, dry_run)
+        if result:
+            st.session_state.email_sent, st.session_state.email_failed = result
+            st.session_state.email_dry_run = dry_run
+
+
+def problem_rows():
+    """Everyone who did not get a certificate by email, with the reason.
+
+    The columns match what people_loader detects, so HR can fix this file
+    and upload it again as the recipient list.
+    """
+    rows = []
+    for row in st.session_state.get("rejected_rows", []):
+        rows.append({"name": row["name"], "email": row["email"], "status": "", "reason": f"Skipped (row {row['row']}): {row['reason']}"})
+    for person in st.session_state.get("generation_failed", []) + st.session_state.get("email_failed", []):
+        rows.append({"name": person["name"], "email": person["email"], "status": person["status"], "reason": person["reason"]})
+    return rows
+
+
+def report_section():
+    """Step 5: counts, failed.csv, and resending to the failed emails."""
+    if "email_sent" not in st.session_state:
         return
 
-    if dry_run:
-        st.success(f"Dry run finished: {len(sent)} emails prepared, none sent.")
-    else:
-        st.success(f"{len(sent)} emails sent.")
-    if failed:
-        st.error(f"{len(failed)} emails could not be sent.")
-        st.dataframe(pd.DataFrame(failed), hide_index=True)
+    dry_run = st.session_state.email_dry_run
+    email_failed = st.session_state.email_failed
+    st.header("5. Report" + (" (dry run)" if dry_run else ""))
+
+    generated_count, sent_count, failed_count, skipped_count = st.columns(4)
+    generated_count.metric("Generated", len(st.session_state.generated))
+    sent_count.metric("Prepared (not sent)" if dry_run else "Sent", len(st.session_state.email_sent))
+    failed_count.metric("Failed", len(st.session_state.get("generation_failed", [])) + len(email_failed))
+    skipped_count.metric("Skipped", len(st.session_state.get("rejected_rows", [])))
+
+    rows = problem_rows()
+    if not rows:
+        st.success("No problems: everyone was handled.")
+        return
+
+    problems = pd.DataFrame(rows)
+    st.dataframe(problems, hide_index=True)
+    # utf-8-sig adds a marker that tells Excel the file is UTF-8, so names
+    # like Hélène are not shown as HÃ©lÃ¨ne when HR opens it.
+    st.download_button(
+        "Download failed.csv",
+        data=problems.to_csv(index=False).encode("utf-8-sig"),
+        file_name="failed.csv",
+        mime="text/csv",
+    )
+    st.caption("To fix skipped rows: correct them in failed.csv, then upload it as the recipient list.")
+
+    if email_failed and not dry_run and st.button(f"Resend to the {len(email_failed)} failed emails"):
+        logger.info("Resending to %d failed recipients", len(email_failed))
+        result = send_emails(email_failed, dry_run=False)
+        if result:
+            newly_sent, still_failed = result
+            st.session_state.email_sent = st.session_state.email_sent + newly_sent
+            st.session_state.email_failed = still_failed
+            # The counts above were drawn before the resend; redraw them.
+            st.rerun()
 
 
 def main():
@@ -334,6 +424,7 @@ def main():
         return
     generation_section(template, settings, people)
     email_section()
+    report_section()
 
 
 try:

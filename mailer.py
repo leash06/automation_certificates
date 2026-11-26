@@ -1,9 +1,11 @@
 """Send each recipient their certificate by Gmail, with a delay and one retry."""
 
+import csv
 import logging
 import os
 import smtplib
 import time
+from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -12,6 +14,9 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 ENV_FILE = Path(__file__).parent / ".env"
+# Who already received which template, to warn before sending twice.
+# It lives in output/, which is never pushed to GitHub.
+HISTORY_FILE = Path(__file__).parent / "output" / "sent_history.csv"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465  # SSL port: the connection is encrypted from the start
 
@@ -89,7 +94,28 @@ def send_with_one_retry(email, sender, password):
         return str(error)
 
 
-def send_certificates(generated_people, messages, dry_run=False, env_file=ENV_FILE):
+def record_sent(person, template_key, history_file=HISTORY_FILE):
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    is_new_file = not history_file.exists()
+    with history_file.open("a", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        if is_new_file:
+            writer.writerow(["sent_at", "template_key", "email", "name"])
+        writer.writerow([datetime.now().isoformat(timespec="seconds"), template_key, person["email"], person["name"]])
+
+
+def find_already_sent(people, template_key, history_file=HISTORY_FILE):
+    """Return the people who already received a certificate for this template."""
+    if not history_file.exists():
+        return []
+    with history_file.open(newline="", encoding="utf-8") as file:
+        emails_sent_before = {
+            row["email"].lower() for row in csv.DictReader(file) if row["template_key"] == template_key
+        }
+    return [person for person in people if person["email"].lower() in emails_sent_before]
+
+
+def send_certificates(generated_people, messages, template_key, dry_run=False, env_file=ENV_FILE, history_file=HISTORY_FILE):
     """Email each person their PDF. Returns (sent, failed).
 
     In a dry run every email is prepared (so missing PDFs are still caught)
@@ -122,6 +148,9 @@ def send_certificates(generated_people, messages, dry_run=False, env_file=ENV_FI
             failed.append({**person, "reason": f"Email not sent: {error_text}"})
             continue
         logger.info("Email sent to %s", person["email"])
+        # Recorded right away, so the history is correct even if the app
+        # is closed in the middle of a batch.
+        record_sent(person, template_key, history_file)
         sent.append(person)
 
     outcome = "prepared (dry run, nothing sent)" if dry_run else "sent"

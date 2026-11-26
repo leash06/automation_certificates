@@ -61,8 +61,16 @@ def make_people(tmp_path, count=2):
     return people
 
 
+def send(people, tmp_path, dry_run=False):
+    # tmp_path keeps the test's .env and history away from the real ones.
+    return mailer.send_certificates(
+        people, MESSAGES, "template-a", dry_run=dry_run,
+        env_file=tmp_path / ".env", history_file=tmp_path / "history.csv",
+    )
+
+
 def test_each_person_gets_personal_message_and_own_pdf(tmp_path):
-    sent, failed = mailer.send_certificates(make_people(tmp_path), MESSAGES, env_file=tmp_path / ".env")
+    sent, failed = send(make_people(tmp_path), tmp_path)
     assert len(sent) == 2 and failed == []
 
     winner_email, participant_email = FakeGmail.sent_emails
@@ -75,20 +83,20 @@ def test_each_person_gets_personal_message_and_own_pdf(tmp_path):
 
 
 def test_dry_run_sends_nothing(tmp_path):
-    sent, failed = mailer.send_certificates(make_people(tmp_path), MESSAGES, dry_run=True, env_file=tmp_path / ".env")
+    sent, failed = send(make_people(tmp_path), tmp_path, dry_run=True)
     assert len(sent) == 2
     assert FakeGmail.sent_emails == []
 
 
 def test_failed_email_is_retried_once(tmp_path):
     FakeGmail.failures_left = 1
-    sent, failed = mailer.send_certificates(make_people(tmp_path, count=1), MESSAGES, env_file=tmp_path / ".env")
+    sent, failed = send(make_people(tmp_path, count=1), tmp_path)
     assert len(sent) == 1 and failed == []
 
 
 def test_email_failing_twice_is_reported_and_batch_continues(tmp_path):
     FakeGmail.failures_left = 2  # first person: first try and retry both fail
-    sent, failed = mailer.send_certificates(make_people(tmp_path), MESSAGES, env_file=tmp_path / ".env")
+    sent, failed = send(make_people(tmp_path), tmp_path)
     assert [person["email"] for person in failed] == ["p0@example.com"]
     assert "Email not sent" in failed[0]["reason"]
     assert [person["email"] for person in sent] == ["p1@example.com"]
@@ -97,7 +105,7 @@ def test_email_failing_twice_is_reported_and_batch_continues(tmp_path):
 def test_missing_pdf_is_reported_not_crashing(tmp_path):
     people = make_people(tmp_path)
     people[0]["pdf_path"] = str(tmp_path / "deleted.pdf")
-    sent, failed = mailer.send_certificates(people, MESSAGES, env_file=tmp_path / ".env")
+    sent, failed = send(people, tmp_path)
     assert "missing" in failed[0]["reason"]
     assert len(sent) == 1
 
@@ -105,7 +113,7 @@ def test_missing_pdf_is_reported_not_crashing(tmp_path):
 def test_wrong_password_gives_one_clear_message(tmp_path):
     FakeGmail.wrong_password = True
     with pytest.raises(ValueError, match="refused the login"):
-        mailer.send_certificates(make_people(tmp_path), MESSAGES, env_file=tmp_path / ".env")
+        send(make_people(tmp_path), tmp_path)
 
 
 def test_missing_gmail_setup_gives_clear_message(monkeypatch, tmp_path):
@@ -121,3 +129,21 @@ def test_app_password_spaces_are_removed(tmp_path):
 
 def test_stray_braces_in_message_do_not_crash():
     assert mailer.personalise("Hi {name} :-} {", "Amina") == "Hi Amina :-} {"
+
+
+def test_sent_people_are_remembered_per_template(tmp_path):
+    people = make_people(tmp_path)
+    history_file = tmp_path / "history.csv"
+    assert mailer.find_already_sent(people, "template-a", history_file) == []
+
+    send(people[:1], tmp_path)
+    assert mailer.find_already_sent(people, "template-a", history_file) == people[:1]
+    # The same person with another template is a different certificate.
+    assert mailer.find_already_sent(people, "template-b", history_file) == []
+
+
+def test_dry_run_and_failed_emails_are_not_remembered(tmp_path):
+    FakeGmail.failures_left = 2
+    send(make_people(tmp_path), tmp_path, dry_run=True)
+    send(make_people(tmp_path, count=1), tmp_path)
+    assert mailer.find_already_sent(make_people(tmp_path), "template-a", tmp_path / "history.csv") == []
