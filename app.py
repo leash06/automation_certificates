@@ -30,20 +30,12 @@ LOG_FILE = PROJECT_FOLDER / "certificates.log"
 # The template is about 3500 px wide. The live preview is drawn on a copy
 # this wide, which is about 12 times fewer pixels, so it updates quickly.
 PREVIEW_WIDTH = 1000
-# The sample names are shown cropped and bigger, so they need more detail.
-SAMPLE_SCALE = 0.5
 MAX_FONT_SIZE = 2000
 
 DEFAULT_FONT = "GreatVibes-Regular.ttf"
 
 MOVE_NAME = "Places or drags the name"
 PICK_COLOUR = "Picks the text colour (eyedropper)"
-
-SAMPLE_NAMES = {
-    "Short name": "Amina Bello",
-    "Long name": "Maximilian Alexander Konstantin von Hohenberg-Schwarzenfeld",
-    "Accents": "Hélène Muñoz François",
-}
 
 NO_COLUMN = "(none)"
 
@@ -192,20 +184,6 @@ def add_guides(screen_copy, settings, scale):
     return screen_copy
 
 
-def name_area(certificate, settings, scale):
-    """Crop around the name so the sample previews are big enough to read."""
-    anchor_x, anchor_y = settings["anchor"][0] * scale, settings["anchor"][1] * scale
-    half_width = settings["max_width"] * 0.6 * scale
-    half_height = settings["font_size"] * 1.2 * scale
-    box = (
-        max(0, anchor_x - half_width),
-        max(0, anchor_y - half_height),
-        min(certificate.width, anchor_x + half_width),
-        min(certificate.height, anchor_y + half_height),
-    )
-    return certificate.crop(box)
-
-
 def template_section():
     """Step 1: upload the template and place the name. Returns the template."""
     st.header("1. Certificate template")
@@ -311,7 +289,12 @@ def placement_editor(template, key, template_name):
         st.number_input("Font size", min_value=MIN_FONT_SIZE, max_value=MAX_FONT_SIZE, step=5, key="font_size")
         st.color_picker("Colour", key="color")
         st.slider("Maximum name width", min_value=100, max_value=template.width, step=10, key="max_width")
-        test_name = st.text_input("Try any name", value="Amina Bello", key="test_name")
+        test_name = st.text_input(
+            "Try any name",
+            value="Amina Bello",
+            key="test_name",
+            help="Try your longest name, and one with accents (é, ç, ñ), to check they fit.",
+        )
         if st.button("Save placement for this template"):
             save_settings(key, current_settings())
             st.session_state.saved_settings_found = True
@@ -336,12 +319,6 @@ def placement_editor(template, key, template_name):
         if gesture:
             handle_canvas_gesture(gesture, template)
             st.rerun(scope="fragment")
-
-    sample_template = scaled_template(template, key, SAMPLE_SCALE)
-    sample_columns = st.columns(len(SAMPLE_NAMES))
-    for column, (label, sample_name) in zip(sample_columns, SAMPLE_NAMES.items()):
-        sample = draw_name(sample_template, sample_name, settings, SAMPLE_SCALE)
-        column.image(name_area(sample, settings, SAMPLE_SCALE), caption=label)
 
 
 def choose_column(label, columns, detected_column):

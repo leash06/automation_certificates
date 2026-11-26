@@ -52,8 +52,9 @@ computer can open it.
    Drag a corner handle of the purple box to make the name bigger or
    smaller. Pink lines appear, and the name snaps, when it reaches the
    centre of the page. The **Centre horizontally / vertically / both**
-   buttons also put it exactly in the middle. Choose the font, size, colour and maximum width; the preview and
-   the three samples (short, long, accented name) update immediately.
+   buttons also put it exactly in the middle. Choose the font, size, colour and maximum width; the preview
+   updates immediately. Type your longest name, and one with accents, in
+   **Try any name** to check they fit.
    To match a colour already on the template, switch clicking to
    **eyedropper** and click that colour. Click **Save placement** to reuse it
    next time.
