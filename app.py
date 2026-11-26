@@ -330,7 +330,10 @@ def sidebar(page, template_ready, people_ready):
     }
     with st.sidebar:
         st.html(SIDEBAR_CSS)
-        st.markdown("### :blue[:material/workspace_premium:] Certificates")
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.markdown("### :blue[:material/workspace_premium:] Certificates")
+            st.space("stretch")
+            theme_toggle()
         st.caption("Design, check and send certificates in a few steps.")
         for page_id, label, icon in PAGES:
             st.button(
@@ -343,8 +346,6 @@ def sidebar(page, template_ready, people_ready):
                 on_click=go_to,
                 args=(page_id,),
             )
-        st.divider()
-        theme_toggle()
 
 
 # ------------------------------------------------------ screen 1: design
