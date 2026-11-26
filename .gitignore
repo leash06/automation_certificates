@@ -7,6 +7,8 @@ output/
 *.csv
 *.xlsx
 *.log
+# HR's saved placements belong to their computer, not to the code
+settings.json
 
 # Python cache/test
 __pycache__/

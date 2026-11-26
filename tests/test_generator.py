@@ -1,6 +1,6 @@
 from PIL import Image, ImageDraw
 
-from generator import FONTS_FOLDER, draw_name, fit_font, safe_file_name
+from generator import FONTS_FOLDER, draw_name, fit_font, generate_certificates, safe_file_name
 
 FONT_PATH = FONTS_FOLDER / "Montserrat-Regular.ttf"
 
@@ -59,3 +59,28 @@ def test_safe_file_name():
     assert safe_file_name("Hélène Muñoz") == "Helene_Munoz.pdf"
     assert safe_file_name("  Jean-Luc  O'Brien ") == "Jean_Luc_O_Brien.pdf"
     assert safe_file_name("李") == "certificate.pdf"
+
+
+def test_one_pdf_per_person_and_same_names_do_not_overwrite(tmp_path):
+    template = Image.new("RGB", (2000, 1000), "white")
+    people = [
+        {"name": "Amina Bello", "email": "amina@example.com", "status": "winner"},
+        {"name": "Amina Bello", "email": "amina.b@example.com", "status": "participant"},
+        {"name": "Hélène Muñoz", "email": "helene@example.com", "status": "participant"},
+    ]
+    generated, failed = generate_certificates(template, people, SETTINGS, tmp_path)
+    assert failed == []
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["Amina_Bello.pdf", "Amina_Bello_2.pdf", "Helene_Munoz.pdf"]
+
+
+def test_one_failure_does_not_stop_the_batch(tmp_path):
+    template = Image.new("RGB", (2000, 1000), "white")
+    people = [
+        {"name": "Amina Bello", "email": "amina@example.com", "status": "winner"},
+        {"name": "Kofi Mensah", "email": "kofi@example.com", "status": "participant"},
+    ]
+    broken_settings = {**SETTINGS, "color": "not-a-colour"}
+    generated, failed = generate_certificates(template, people, broken_settings, tmp_path)
+    assert generated == []
+    assert len(failed) == 2
+    assert "could not be created" in failed[0]["reason"]

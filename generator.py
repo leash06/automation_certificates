@@ -4,11 +4,14 @@ The placement preview in app.py and the final certificates both call
 draw_name(), so what HR sees on screen is exactly what recipients receive.
 """
 
+import logging
 import re
 import unicodedata
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+logger = logging.getLogger(__name__)
 
 FONTS_FOLDER = Path(__file__).parent / "fonts"
 
@@ -63,6 +66,43 @@ def save_certificate_pdf(certificate, output_path):
     """Save the image as a PDF at print quality."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     certificate.save(output_path, "PDF", resolution=300)
+
+
+def unique_pdf_path(folder, file_name):
+    """Add _2, _3... so two people with the same name never overwrite each other."""
+    path = folder / file_name
+    number = 2
+    while path.exists():
+        path = folder / f"{Path(file_name).stem}_{number}.pdf"
+        number += 1
+    return path
+
+
+def generate_certificates(template, people, settings, output_folder):
+    """Save one PDF per person and return (generated, failed).
+
+    One person failing is recorded and skipped; it never stops the batch.
+    """
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+    generated = []
+    failed = []
+
+    for person in people:
+        pdf_path = unique_pdf_path(output_folder, safe_file_name(person["name"]))
+        try:
+            certificate = draw_name(template, person["name"], settings)
+            save_certificate_pdf(certificate, pdf_path)
+        except Exception as error:
+            # Broad on purpose: whatever goes wrong for one person, the
+            # others must still get their certificate. The log keeps details.
+            logger.exception("Could not create certificate for %s", person["email"])
+            failed.append({**person, "reason": f"Certificate could not be created: {error}"})
+            continue
+        generated.append({**person, "pdf_path": str(pdf_path)})
+
+    logger.info("Generated %d certificates in %s (%d failed)", len(generated), output_folder, len(failed))
+    return generated, failed
 
 
 if __name__ == "__main__":
