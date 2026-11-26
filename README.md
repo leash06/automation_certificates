@@ -64,7 +64,7 @@ computer can open it.
    empty name, a bad email or a duplicate are listed and skipped.
 3. **Preview and generate:** check the first certificate, then generate all.
    The PDFs go to a new dated folder inside `output/`.
-4. **Send by email:** edit the subject and messages (`{name}` becomes each
+4. **Send by email:** edit the subject and the message template (`{name}` becomes each
    person's name). Start with a **dry run**: it prepares everything and sends
    nothing. **Untick "Dry run" to really send**; while it is ticked, no email
    leaves your computer. If some people already received this
@@ -102,7 +102,7 @@ python generator.py       # make 3 sample PDFs in output/ from the sample templa
 | `people_loader.py` | Excel/CSV list → valid recipients + skipped rows with reasons |
 | `generator.py` | Draws the name centred on the anchor, shrinks long names, saves PDFs |
 | `mailer.py` | Gmail sending with delay, one retry, dry run and sending history |
-| `settings_store.py` | Saves placement and messages per template in `settings.json` |
+| `settings_store.py` | Saves placement and the email message per template in `settings.json` |
 | `font_library.py` | Lists fonts, adds uploaded fonts, downloads Google Fonts |
 | `placement_canvas.py` | Template preview where the name is dragged smoothly in the browser |
 | `tests/` | Automated tests (Gmail is replaced by a fake, nothing is sent) |

@@ -41,12 +41,7 @@ NO_COLUMN = "(none)"
 
 DEFAULT_MESSAGES = {
     "subject": "Your certificate, {name}",
-    "winner_body": (
-        "Congratulations {name}!\n\n"
-        "You are one of our winners. Your certificate is attached.\n\n"
-        "Best regards,\nThe HR team"
-    ),
-    "participant_body": (
+    "message_template": (
         "Dear {name},\n\n"
         "Thank you for taking part. Your certificate is attached.\n\n"
         "Best regards,\nThe HR team"
@@ -134,6 +129,10 @@ def start_placement(key, template):
     # Saved values win; defaults fill anything never saved (e.g. messages
     # saved but placement not yet, or the reverse).
     settings = {**default_settings(template), **DEFAULT_MESSAGES, **(saved or {})}
+    # Templates saved before there was a single message kept a separate
+    # participant message; that one becomes the message template.
+    if saved and "message_template" not in saved and "participant_body" in saved:
+        settings["message_template"] = saved["participant_body"]
     if settings["font_file"] not in available_fonts():
         settings["font_file"] = available_fonts()[0]
 
@@ -148,15 +147,13 @@ def start_placement(key, template):
     st.session_state.color = settings["color"]
     st.session_state.max_width = min(settings["max_width"], template.width)
     st.session_state.subject = settings["subject"]
-    st.session_state.winner_body = settings["winner_body"]
-    st.session_state.participant_body = settings["participant_body"]
+    st.session_state.message_template = settings["message_template"]
 
 
 def current_messages():
     return {
         "subject": st.session_state.subject,
-        "winner_body": st.session_state.winner_body,
-        "participant_body": st.session_state.participant_body,
+        "message_template": st.session_state.message_template,
     }
 
 
@@ -431,9 +428,7 @@ def email_section():
 
     st.header("4. Send by email")
     st.text_input("Subject", key="subject")
-    winner_box, participant_box = st.columns(2)
-    winner_box.text_area("Message for winners", key="winner_body", height=200)
-    participant_box.text_area("Message for participants", key="participant_body", height=200)
+    st.text_area("Message template", key="message_template", height=200)
     st.caption("{name} is replaced by each person's name.")
     if st.button("Save messages for this template"):
         save_settings(st.session_state.template_key, current_messages())

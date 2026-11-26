@@ -63,14 +63,13 @@ def personalise(text, name):
 
 
 def build_email(sender, person, messages):
-    body = messages["winner_body"] if person["status"] == "winner" else messages["participant_body"]
     pdf_path = Path(person["pdf_path"])
 
     email = EmailMessage()
     email["From"] = sender
     email["To"] = person["email"]
     email["Subject"] = personalise(messages["subject"], person["name"])
-    email.set_content(personalise(body, person["name"]))
+    email.set_content(personalise(messages["message_template"], person["name"]))
     email.add_attachment(pdf_path.read_bytes(), maintype="application", subtype="pdf", filename=pdf_path.name)
     return email
 

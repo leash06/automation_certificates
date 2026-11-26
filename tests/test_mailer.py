@@ -8,8 +8,7 @@ import mailer
 
 MESSAGES = {
     "subject": "Your certificate, {name}",
-    "winner_body": "Congratulations {name}! You won.",
-    "participant_body": "Thank you {name} for taking part.",
+    "message_template": "Congratulations {name}! Thank you for taking part.",
 }
 
 
@@ -78,12 +77,12 @@ def test_each_person_gets_personal_message_and_own_pdf(tmp_path):
     sent, failed = send(make_people(tmp_path), tmp_path)
     assert len(sent) == 2 and failed == []
 
-    winner_email, participant_email = FakeGmail.sent_emails
-    assert winner_email["To"] == "p0@example.com"
-    assert winner_email["Subject"] == "Your certificate, Person 0"
-    assert "Congratulations Person 0! You won." in winner_email.get_body().get_content()
-    assert "Thank you Person 1" in participant_email.get_body().get_content()
-    attachment = next(participant_email.iter_attachments())
+    first_email, second_email = FakeGmail.sent_emails
+    assert first_email["To"] == "p0@example.com"
+    assert first_email["Subject"] == "Your certificate, Person 0"
+    assert "Congratulations Person 0! Thank you for taking part." in first_email.get_body().get_content()
+    assert "Congratulations Person 1!" in second_email.get_body().get_content()
+    attachment = next(second_email.iter_attachments())
     assert attachment.get_filename() == "person_1.pdf"
 
 
