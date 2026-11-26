@@ -6,6 +6,7 @@
 output/
 *.csv
 *.xlsx
+*.log
 
 # Python cache/test
 __pycache__/
