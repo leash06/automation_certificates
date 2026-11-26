@@ -94,6 +94,7 @@ python generator.py       # make 3 sample PDFs in output/ from the sample templa
 | `mailer.py` | Gmail sending with delay, one retry, dry run and sending history |
 | `settings_store.py` | Saves placement and messages per template in `settings.json` |
 | `font_library.py` | Lists fonts, adds uploaded fonts, downloads Google Fonts |
+| `placement_canvas.py` | Template preview where the name is dragged smoothly in the browser |
 | `tests/` | Automated tests (Gmail is replaced by a fake, nothing is sent) |
 
 Not stored in Git: `.env`, `output/`, `settings.json`, logs, and any `.csv` or

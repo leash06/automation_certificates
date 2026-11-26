@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-from PIL import ImageDraw
-from streamlit_image_coordinates import streamlit_image_coordinates
+from PIL import Image, ImageColor, ImageDraw
 
 from font_library import add_font_file, available_fonts, download_google_font, font_display_name
-from generator import MIN_FONT_SIZE, draw_name, generate_certificates
+from generator import MIN_FONT_SIZE, draw_name, generate_certificates, write_name
+from placement_canvas import image_data_url, placement_canvas
 from mailer import find_already_sent, send_certificates
 from people_loader import EMAIL_HEADERS, NAME_HEADERS, STATUS_HEADERS, clean_people, find_column, read_people_table
 from settings_store import load_settings, save_settings, template_key
@@ -83,6 +83,27 @@ def scaled_template(_template, key, scale):
     # The leading _ tells Streamlit not to hash the big image on every
     # rerun; the template key already identifies it.
     return _template.resize((round(_template.width * scale), round(_template.height * scale)))
+
+
+@st.cache_resource(max_entries=4)
+def background_url(_template, key):
+    # The template picture never changes while HR places the name, so it is
+    # encoded for the browser once, not on every change.
+    return image_data_url(scaled_template(_template, key, PREVIEW_WIDTH / _template.width), "JPEG")
+
+
+def name_layer(template, key, name, settings):
+    """A transparent picture, the size of the screen preview, holding only
+    the name and the guides. The browser slides it when HR drags the name."""
+    scale = PREVIEW_WIDTH / template.width
+    size = scaled_template(template, key, scale).size
+    # Transparent pixels in the text colour (alpha 0), not transparent black:
+    # the soft edges of the letters blend with this, so black would give
+    # light text a dark outline.
+    layer = Image.new("RGBA", size, ImageColor.getrgb(settings["color"])[:3] + (0,))
+    write_name(layer, name, settings, scale)
+    add_guides(layer, settings, scale)
+    return layer
 
 
 def default_settings(template):
@@ -245,12 +266,11 @@ def centre_buttons(template):
 
 def handle_template_click(event, template, click_mode):
     """Turn a click or drag on the screen preview into a new anchor or colour."""
-    # The event is in screen pixels; convert to template pixels.
-    to_template = template.width / event["width"]
-    start_x, start_y = event["x1"] * to_template, event["y1"] * to_template
+    # The event is in fractions of the picture (0 to 1); convert to template pixels.
+    start_x, start_y = event["x1"] * template.width, event["y1"] * template.height
     # The mouse can be released outside the image, so keep the point inside it.
-    end_x = min(max(event["x2"] * to_template, 0), template.width - 1)
-    end_y = min(max(event["y2"] * to_template, 0), template.height - 1)
+    end_x = min(max(event["x2"] * template.width, 0), template.width - 1)
+    end_y = min(max(event["y2"] * template.height, 0), template.height - 1)
 
     if click_mode == PICK_COLOUR:
         red, green, blue = template.getpixel((int(end_x), int(end_y)))
@@ -294,20 +314,13 @@ def placement_editor(template, key, template_name):
         centre_buttons(template)
         settings = current_settings()
 
-        scale = PREVIEW_WIDTH / template.width
-        preview_image = draw_name(scaled_template(template, key, scale), test_name or "Amina Bello", settings, scale)
-        event = streamlit_image_coordinates(
-            add_guides(preview_image, settings, scale),
-            key="placement_click",
-            width="stretch",
-            image_format="JPEG",
-            cursor="crosshair",
-            click_and_drag=True,
+        event = placement_canvas(
+            background_url(template, key),
+            name_layer(template, key, test_name or "Amina Bello", settings),
+            mode="colour" if click_mode == PICK_COLOUR else "move",
+            key="placement_canvas",
         )
-        # The component returns the last event on every rerun, so we only act
-        # on an event we have not handled yet.
-        if event and event["unix_time"] != st.session_state.get("last_event_time"):
-            st.session_state.last_event_time = event["unix_time"]
+        if event:
             handle_template_click(event, template, click_mode)
             st.rerun(scope="fragment")
 

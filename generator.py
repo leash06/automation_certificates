@@ -37,23 +37,31 @@ def fit_font(name, font_path, font_size, max_width):
 
 
 def draw_name(template, name, settings, scale=1):
-    """Return a new image with the name centred on the anchor point.
-
-    scale is for the live on-screen preview: the template given is a smaller
-    copy (e.g. scale=0.28), which is much faster to draw. The font size is
-    still chosen at full size first, so the preview matches the final PDF.
-    """
+    """Return a new image with the name centred on the anchor point."""
     # convert() returns a copy, so the original template is never changed.
     # PDF has no transparency, so RGB is also what we need to save it later.
     certificate = template.convert("RGB")
+    write_name(certificate, name, settings, scale)
+    return certificate
 
+
+def write_name(image, name, settings, scale=1):
+    """Draw the name onto the image itself, centred on the anchor point.
+
+    This is the only place a name is drawn: certificates, previews and the
+    draggable name layer in the app all come through here.
+
+    scale is for the live on-screen preview: the image given is a smaller
+    copy (e.g. scale=0.28), which is much faster to draw. The font size is
+    still chosen at full size first, so the preview matches the final PDF.
+    """
     font_path = FONTS_FOLDER / settings["font_file"]
     font = fit_font(name, font_path, settings["font_size"], settings["max_width"])
     if scale != 1:
         font = ImageFont.truetype(str(font_path), max(1, round(font.size * scale)))
 
     anchor_x, anchor_y = settings["anchor"]
-    draw = ImageDraw.Draw(certificate)
+    draw = ImageDraw.Draw(image)
     # anchor="mm" means the point we give is the middle of the text, both
     # horizontally and vertically, so every name is centred on that point.
     draw.text(
@@ -63,7 +71,6 @@ def draw_name(template, name, settings, scale=1):
         fill=settings["color"],
         anchor="mm",
     )
-    return certificate
 
 
 def safe_file_name(name):
